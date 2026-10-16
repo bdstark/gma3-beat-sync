@@ -1,4 +1,4 @@
-# gma3-link
+# gma3-beat-sync
 
 A grandMA3 plugin that follows a tempo session on the local network. It is meant to be compatible with Link™,
 Ableton's synchronization technology. The plugin sets a speed master to the session's tempo, keeps effects in phase
