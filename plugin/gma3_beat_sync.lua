@@ -189,7 +189,9 @@ local function run()
   local frames, frame_periods, dropped = 0, {}, 0
   status.frame_periods_us = frame_periods -- the last FRAME_WINDOW frame periods, oldest first
   local last_frame_us = now_us()
-  local tempo_written, consecutive_errors = nil, 0
+  -- What the speed master was last set to ({ master, bpm }); nil when it must be set (after joining, a show load or
+  -- a change of BeatSync.Master). Reconciled every frame against the session's current tempo.
+  local tempo_written, tempo_retry_us, consecutive_errors = nil, 0, 0
   local showfile = Root().ManetSocket and Root().ManetSocket.Showfile
   status.show = showfile
 
@@ -200,17 +202,42 @@ local function run()
     status["last_" .. kind:sub(1, -2)] = text
   end
 
-  local function command(label, cmd, beat, at_us, t_us)
+  -- Runs a command line and classifies the console's answer. Cmd returns the command's feedback as text ("OK";
+  -- "Object not found" for a missing object or keyword, BS-02 record) rather than raising, so the text decides:
+  -- "ok", "failed" (an answer that says so), or "uncertain" (anything else). Nothing is retried.
+  local FAILURE_WORDS = { "not found", "error", "illegal", "invalid", "unknown", "denied", "not allowed", "failed",
+    "cannot", "can't", "refused" }
+  local function run_cmd(cmd)
     local ok2, result = pcall(Cmd, cmd)
-    local timing = at_us and string.format(" (%+.1f ms)", (t_us - at_us) / 1000) or ""
-    status.last_action = string.format("%s: %s%s%s%s", label, cmd, beat and (" at beat " .. beat // 1000000) or "",
-      timing, ok2 and "" or (" failed: " .. tostring(result)))
-    if not ok2 then report("errors", label .. " failed: " .. tostring(result)) end
+    if not ok2 then return "failed", tostring(result) end
+    if result == true then return "ok", "OK" end
+    if result == false then return "failed", "false" end
+    if type(result) ~= "string" then return "uncertain", tostring(result) end
+    local lower = result:lower()
+    if lower == "ok" then return "ok", result end
+    for _, w in ipairs(FAILURE_WORDS) do
+      if lower:find(w, 1, true) then return "failed", result end
+    end
+    return "uncertain", result
   end
 
+  local function command(label, cmd, beat, at_us, t_us)
+    local outcome, feedback = run_cmd(cmd)
+    local timing = at_us and string.format(" (%+.1f ms)", (t_us - at_us) / 1000) or ""
+    status.last_action = string.format("%s: %s%s%s%s", label, cmd, beat and (" at beat " .. beat // 1000000) or "",
+      timing, outcome == "ok" and "" or (" " .. outcome .. ": " .. feedback))
+    if outcome == "failed" then
+      report("errors", label .. " failed: " .. feedback)
+      status.last_error = label .. " failed: " .. feedback
+    elseif outcome == "uncertain" then
+      report("warnings", label .. ": unexpected answer: " .. feedback)
+    end
+  end
+
+  -- Sets the speed master to bpm. Returns true when the write was accepted (or answered with something unexpected,
+  -- which is reported and not retried), false when the console refused it.
   local function write_tempo(bpm)
     local m = config.master_handle
-    if not m then return end
     -- A speed master's base tempo stops at 225 BPM (BS-01); raise its SpeedScale for faster sessions.
     -- "At BPM" sets the effective tempo whatever the scale (gma3-mcp SB-06).
     local factor = 1
@@ -218,11 +245,45 @@ local function run()
     if factor > 1 then
       local scale = "Mul" .. factor
       -- the property reads as an enum index (0 = One, 1 = Mul2); its name comes from the Display role
-      local ok_get, current = pcall(function() return m:Get("SpeedScale", Enums.Roles.Display) end)
-      if not ok_get or tostring(current) ~= scale then pcall(function() m:Set("SpeedScale", scale) end) end
+      local function current() local okg, v = pcall(function() return m:Get("SpeedScale", Enums.Roles.Display) end)
+        return okg and tostring(v) or nil end
+      if current() ~= scale then
+        local oks, e = pcall(function() m:Set("SpeedScale", scale) end)
+        if not oks or current() ~= scale then
+          local why = "SpeedScale of speed master " .. config.master .. " could not be set to " .. scale
+            .. (oks and "" or (": " .. tostring(e)))
+          report("errors", why)
+          status.last_error = why
+          return false
+        end
+      end
     end
-    local ok3, e = pcall(Cmd, string.format("Master 3.%d At BPM %.4f", config.master, bpm))
-    if ok3 then tempo_written = bpm else report("errors", "speed master write failed: " .. tostring(e)) end
+    local cmd = string.format("Master 3.%d At BPM %.4f", config.master, bpm)
+    local outcome, feedback = run_cmd(cmd)
+    if outcome == "failed" then
+      local why = "speed master write refused: " .. cmd .. ": " .. feedback
+      report("errors", why)
+      status.last_error = why
+      return false
+    elseif outcome == "uncertain" then
+      report("warnings", "speed master write: unexpected answer: " .. feedback)
+    end
+    return true
+  end
+
+  -- Keeps the speed master on the session's tempo: written when it was never written for this master, when the
+  -- tempo moved by the threshold, after a show load or a join. A refused write is tried again after 1 s.
+  local function reconcile_tempo(now)
+    if not config.master_handle then return end
+    local pos = follower:position(now)
+    if not pos or now < tempo_retry_us then return end
+    local w = tempo_written
+    if w and w.master == config.master and math.abs(pos.bpm - w.bpm) < config.threshold then return end
+    if write_tempo(pos.bpm) then
+      tempo_written = { master = config.master, bpm = pos.bpm }
+    else
+      tempo_written, tempo_retry_us = nil, now + 1000000
+    end
   end
 
   local function handle(ev, t_us)
@@ -234,7 +295,7 @@ local function run()
       report("warnings", "left session " .. P.hex(ev.session_id))
       if config.OnLeave ~= "" then command("OnLeave", config.OnLeave) end
     elseif ev.kind == "tempo" then
-      if not tempo_written or math.abs(ev.bpm - tempo_written) >= config.threshold then write_tempo(ev.bpm) end
+      -- the speed master is reconciled every frame (reconcile_tempo)
     elseif ev.kind == "start" then
       if config.OnStart ~= "" then command("OnStart", config.OnStart) end
     elseif ev.kind == "stop" then
@@ -341,6 +402,7 @@ local function run()
     for _, ev in ipairs(follower:frame(t, med or 16667, { lead_us = config.lead_us, always = not config.start_stop })) do
       handle(ev, t + config.lead_us)
     end
+    reconcile_tempo(now_us())
 
     if frames % STATUS_EVERY == 0 then publish(now_us()) end
   end

@@ -74,6 +74,29 @@ Each has an offline regression test that fails without the fix:
   gave a base of 150 BPM ("300 *B").
 - On stop, the final status write replaced `stopped` with the follower's state (`plugin_test.lua`: State `stopped`).
 
+## Review round 1 (PR #4)
+
+The review found seven gaps, all fixed with offline regression tests that fail on the reviewed code (19 follower
+and 18 plugin checks):
+
+- Timelines outside Link's range (20–999 BPM, beats and times within ±2^53) are rejected; a zero-length beat used
+  to be followed as 999 BPM.
+- The speed master is reconciled every frame: a change of `BeatSync.Master`, a show load or a join writes the
+  current tempo even when the tempo itself does not change.
+- When the followed session leaves, the follower moves to a surviving measured session.
+- A failed first measurement is retried after 1, 2, 4 … 30 s while the session is announced.
+- A measurement also fails after 20 paired pongs without data points, 300 pings or 2 s.
+- `Cmd`'s answer decides success. On this console it returns "OK", or "Object not found" for a missing object or
+  keyword (checked on onPC 2.5.1), and never raises an error. Refusals are reported as failed and unexpected
+  answers as uncertain, with no replay. A refused tempo write is retried after 1 s; a SpeedScale that does not take
+  is reported.
+- Peers and sessions are capped (64, 16) with eviction that spares the followed session and the one being
+  measured. Announced ttls are honoured up to 30 s.
+
+Live re-run on onPC 2.5.1 with that code ([bs-02/round1-*.json](bs-02/)): `leave`, `beattime` and `startstop` pass
+(ByeBye 426 ms, ttl 5.07 s; BEATTIME-2 lag 19.7 → 22.2 ms; the first beat action on the start bar). Changing
+`BeatSync.Master` from 12 to 13 during a steady 133.5 BPM session wrote master 13 within 2 s.
+
 ## Console facts
 
 - **Components:** the plugin's three `ComponentLua` chunks run at import with a shared signal table; the protocol and
@@ -85,6 +108,8 @@ Each has an offline regression test that fails without the fix:
     about 2.6 ms, twice a second; the status (17 variables) four times a second is negligible.
   - A variable set to an empty string reads back as `nil`.
   - "no", "off" and "false" stay strings.
+- **`Cmd` returns the command's feedback** as text: "OK", or "Object not found" for a missing object or an unknown
+  keyword ("Xyzzy", "Go+ Sequence 99999", "Master 3.99 At BPM 120"). It did not raise for any of them.
 
 ## Show load (with the maintainer at the console)
 

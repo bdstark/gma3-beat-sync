@@ -57,7 +57,7 @@ The plugin reads them when it starts and every half second. A missing variable t
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `BeatSync.Master` | (none) | Speed master 1–16 to set to the session's tempo (`Master 3.<n>`). Above 225 BPM, its SpeedScale is raised (Mul2, Mul4, Mul8); it is never lowered. |
+| `BeatSync.Master` | (none) | Speed master 1–16 to set to the session's tempo (`Master 3.<n>`). It is written when the plugin joins a session, when this variable changes, after a show load and when the tempo moves by `TempoThreshold`; a refused write is tried again every second. Above 225 BPM, its SpeedScale is raised (Mul2, Mul4, Mul8); it is never lowered, and a scale the console does not take is reported (the tempo is then not written). |
 | `BeatSync.Quantum` | `4` | Beats per bar, 1–64. |
 | `BeatSync.StartStop` | `on` | `on`: beat and bar actions run only while the session plays; `off`: always. |
 | `BeatSync.Resync` | (none) | Sequences to `ReSync` on every bar, separated by commas or spaces. |
@@ -73,6 +73,10 @@ The plugin reads them when it starts and every half second. A missing variable t
 Commands are console command lines, as typed. Problems in the configuration (a speed master or sequence that does
 not exist, an action that is not `<N> <phase> <command>`, a bad quantum) are reported in `BeatSync.Problems`; the
 rest of the configuration still works.
+
+The console answers every command with text: `OK`, or a reason such as `Object not found`. An answer that says it
+failed is reported (`failed: …` in `BeatSync.LastAction`, and `BeatSync.Error`); any other answer is reported as
+`uncertain: …`. A command is never sent again because of its answer.
 
 ## Status
 
@@ -121,6 +125,19 @@ session …", "show loaded: …"), `frame_periods_us` (the last 120 frame period
   next beat).
 - **Missed frames.** When the console misses frames, a beat whose frame is more than one frame late is skipped and
   counted in `BeatSync.MissedBeats`, rather than run late.
+
+## What the plugin accepts from the network
+
+- **Timelines:** a session's tempo must be within Link's range, 20 to 999 BPM (60 060 to 3 000 000 µs a beat), and
+  its beats and times within ±2^53. Messages with values outside are ignored (`counters.invalid_timelines`); the
+  last valid state stays, so a bad message can never set the speed master.
+- **Capacity:** at most 64 peers and 16 sessions are kept, and a peer's announced lifetime is honoured up to 30 s.
+  When a table is full, the entry seen longest ago is replaced, except the followed session and the one being
+  measured and their peers (`counters.evicted_peers`, `evicted_sessions`, `dropped`).
+- **Measurement:** a measurement fails after 5 unanswered pings, 20 answers that bring no timing, 300 pings or 2 s.
+  A session whose first measurement failed is tried again after 1 s, then 2, 4 … up to 30 s, while it is
+  announced (`counters.failed`, `retries`; `failed_sessions` in the status table). When the followed session
+  leaves, the plugin moves at once to another measured session, if there is one.
 
 ## Network and security
 

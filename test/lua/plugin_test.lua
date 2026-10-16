@@ -42,7 +42,11 @@ local function console(vars, opts_arg)
   for n = 1, 16 do
     -- like the console: SpeedScale reads as an enum index; Get with the Display role gives its name
     c.masters[n] = { no = n, scale = "One",
-      Set = function(self, k, v) assert(k == "SpeedScale") self.scale = v c.scale_sets = c.scale_sets + 1 end,
+      Set = function(self, k, v)
+        assert(k == "SpeedScale")
+        c.scale_sets = c.scale_sets + 1
+        if not c.scale_locked then self.scale = v end -- a locked master ignores the write, as the console does
+      end,
       Get = function(self, k, role) assert(k == "SpeedScale" and role == "Display") return self.scale end }
     setmetatable(c.masters[n], { __index = function(self, k) if k == "SpeedScale" then
       return ({ One = 0, Mul2 = 1, Mul4 = 2, Mul8 = 3 })[self.scale] end end })
@@ -99,7 +103,7 @@ local function console(vars, opts_arg)
     Cmd = function(cmd)
       if c.cmd_error then error(c.cmd_error) end
       c.cmds[#c.cmds + 1] = { t = c.us, cmd = cmd }
-      return "Ok"
+      return c.cmd_answer and c.cmd_answer(cmd) or "OK"
     end,
     Enums = { Roles = { Display = "Display" } },
     CmdIndirect = function(cmd) c.indirect[#c.indirect + 1] = cmd end,
@@ -369,6 +373,98 @@ do
   c.peer.present = false
   c.load_chunks()
   check(next(c.vars) == nil, "the chunk writes no variable in a show without them")
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- Review round 1 (PR #4)
+
+-- 1. A session with an invalid timeline never drives the show; an invalid update keeps the last valid state
+do
+  local c = console({ Master = "3" })
+  c.peer.mpb = 0
+  c.run(2)
+  check(c.vars["BeatSync.State"] ~= "following", "a zero-length beat is not followed: " .. tostring(c.vars["BeatSync.State"]))
+  check(#cmds_matching(c, "^Master") == 0, "no tempo written from an invalid timeline")
+  check(c.vars["BeatSync.Tempo"] == "" or c.vars["BeatSync.Tempo"] == nil, "no tempo reported: " .. tostring(c.vars["BeatSync.Tempo"]))
+  c.peer.mpb = 500000
+  c.run(2)
+  check(c.vars["BeatSync.State"] == "following" and c.vars["BeatSync.Tempo"] == "120.000", "a valid timeline is followed")
+  c.peer.mpb, c.peer.beat_origin = -1, 10 ^ 12
+  c.run(1)
+  check(c.vars["BeatSync.Tempo"] == "120.000", "an invalid update keeps 120: " .. tostring(c.vars["BeatSync.Tempo"]))
+  check(#cmds_matching(c, "^Master 3%.3 At BPM 999") == 0, "never written as 999")
+  check((c.env.BeatSync.status.counters.invalid_timelines or 0) > 0, "invalid timelines counted")
+end
+
+-- 2. The speed master is reconciled: a new BeatSync.Master, and a show load, get the current tempo at once
+do
+  local c = console({ Master = "3" })
+  c.run(2)
+  check(#cmds_matching(c, "^Master 3%.3 At BPM 120") == 1, "Master 3 written")
+  c.vars["BeatSync.Master"] = "4"
+  c.run(1)
+  check(#cmds_matching(c, "^Master 3%.4 At BPM 120") == 1, "Master 4 written after the change, at the steady tempo")
+  c.show = "Show B"
+  c.run(1)
+  check(#cmds_matching(c, "^Master 3%.4 At BPM 120") == 2, "written again after a show load at the same tempo")
+  c.run(2)
+  check(#cmds_matching(c, "^Master 3%.4") == 2, "not rewritten while nothing changes")
+end
+
+-- 5. The console's answers decide success: refusals and unexpected answers are reported, nothing is replayed
+do
+  local c = console({ Master = "3", OnBeat = "Go+ Macro 5" })
+  c.cmd_answer = function(cmd) if cmd:find("^Go") then return "Object not found" end return "OK" end
+  c.run(2)
+  check((c.vars["BeatSync.LastAction"] or ""):find("failed: Object not found"), "a refused action is reported: "
+    .. tostring(c.vars["BeatSync.LastAction"]))
+  check((c.vars["BeatSync.Error"] or ""):find("OnBeat failed: Object not found"), "and shown in Error: "
+    .. tostring(c.vars["BeatSync.Error"]))
+  local beats = #cmds_matching(c, "^Go%+ Macro 5$")
+  c.cmd_answer = function(cmd) if cmd:find("^Go") then return "Please confirm" end return "OK" end
+  c.run(1)
+  check((c.vars["BeatSync.LastAction"] or ""):find("uncertain: Please confirm"), "an unexpected answer is uncertain")
+  local n = #cmds_matching(c, "^Go%+ Macro 5$") - beats
+  check(n >= 1 and n <= 3, "each beat's action is sent once, not replayed (" .. n .. " in 1 s at 120 bpm)")
+  -- a refused tempo write is not recorded as written and is tried again after a second, not every frame
+  local d = console({ Master = "3" })
+  d.cmd_answer = function(cmd) if cmd:find("^Master") then return "Object not found" end return "OK" end
+  d.run(3.2)
+  local writes = #cmds_matching(d, "^Master 3%.3")
+  check(writes >= 3 and writes <= 4, "a refused tempo write is retried once a second (" .. writes .. " in 3 s)")
+  check((d.vars["BeatSync.Error"] or ""):find("speed master write refused"), "the refusal is reported: "
+    .. tostring(d.vars["BeatSync.Error"]))
+  d.cmd_answer = nil
+  d.run(2)
+  local after = #cmds_matching(d, "^Master 3%.3")
+  d.run(2)
+  check(#cmds_matching(d, "^Master 3%.3") == after, "once accepted, it is not written again")
+  -- a SpeedScale that cannot be set is reported, and the tempo is not written clamped
+  local e = console({ Master = "3" })
+  e.scale_locked = true
+  e.peer.mpb = 200000 -- 300 bpm
+  e.run(2)
+  check((e.vars["BeatSync.Error"] or ""):find("SpeedScale of speed master 3 could not be set to Mul2"),
+    "a SpeedScale refusal is reported: " .. tostring(e.vars["BeatSync.Error"]))
+  check(#cmds_matching(e, "^Master 3%.3 At BPM 300") == 0, "no tempo written above 225 without the scale")
+end
+
+-- 7. Churn of new identities through the plugin: tables stay capped and every frame stays within its limits
+do
+  local c = console({ Master = "3" })
+  c.run(1)
+  local i = 0
+  c.run(4, function()
+    for _ = 1, 30 do -- 30 new identities per frame, each announcing a 255 s ttl, more than the 32-packet cap
+      i = i + 1
+      local node = string.pack(">I8", 10 ^ 9 + i)
+      c.mc_queue[#c.mc_queue + 1] = "_asdp_v\1" .. string.pack(">I1I1I2", 1, 255, 0) .. node
+        .. entry("tmln", string.pack(">i8i8i8", 500000, 0, 0)) .. entry("sess", string.pack(">I8", 2 * 10 ^ 9 + i % 200))
+    end
+  end)
+  local s = c.env.BeatSync.status
+  check(s.peers <= 64 and s.sessions <= 16, "capped through the plugin: " .. s.peers .. " peers, " .. s.sessions .. " sessions")
+  check(c.vars["BeatSync.State"] == "following", "still following the real peer: " .. tostring(c.vars["BeatSync.State"]))
 end
 
 print(string.format("plugin_test: %d checks, %d failures", checks, failures))

@@ -33,16 +33,40 @@ local REMEASURE_US = 30000000
 local START_GRACE_US = 100000
 F.START_GRACE_US = START_GRACE_US
 
+-- Bounds on what the network can make the follower keep and do. The tables are capped, so pruning, choosing and
+-- status stay bounded however many identities appear. When a table is full, the entry seen longest ago is evicted,
+-- except the followed session, the one being measured and their peers; when only those are left, the newcomer is
+-- dropped (counters.dropped).
+local MAX_PEERS = 64
+local MAX_SESSIONS = 16
+local MAX_TTL_US = 30000000 -- a peer's announced ttl (up to 255 s) is honoured up to 30 s; Link's own is 5 s
+-- A measurement fails after 5 timeouts (link/Measurement.hpp), and also after 20 paired pongs that brought no data
+-- points, 300 pings, or 2 s, so one session cannot hold the measurement forever.
+local MAX_UNUSABLE = 20
+local MAX_ATTEMPTS = 300
+local MEASURE_DEADLINE_US = 2000000
+-- A session whose measurement failed is tried again after 1 s, then 2, 4 ... up to 30 s, while it is announced.
+local RETRY_FIRST_US, RETRY_MAX_US = 1000000, 30000000
+-- Values a session's timeline and start/stop state may hold. Link's tempo range is 20 to 999 bpm
+-- (link/ClientSessionTimelines.hpp, clampTempo), which a peer sends as llround(60e6 / bpm) micros per beat
+-- (link/Tempo.hpp): 60060 to 3000000. Beats and times are kept within 2^53 so the arithmetic stays exact.
+local MIN_MPB, MAX_MPB = 60060, 3000000
+local MAX_ABS = 2 ^ 53
+F.MAX_PEERS, F.MAX_SESSIONS = MAX_PEERS, MAX_SESSIONS
+
 function F.new(P, opts)
   opts = opts or {}
   local self = setmetatable({}, Follower)
   self.P = P
   self.quantum = P.llround((opts.quantum or 4) * 1e6) -- micro-beats
-  self.peers = {}      -- node id -> { session_id, timeline, start_stop, mep4, seen_us, ttl_us }
-  self.sessions = {}   -- session id -> { timeline, start_stop, xform, measured_us, failed }
+  self.peers = {}      -- node id -> { node_id, session_id, timeline, start_stop, mep4, seen_us, ttl_us }
+  self.n_peers = 0
+  self.sessions = {}   -- session id -> { timeline, start_stop, xform, measured_us, seen_us, failed, retry_us, backoff_us }
+  self.n_sessions = 0
   self.current = nil   -- the session followed
-  self.measuring = nil -- { session_id, endpoint, points, prev_ghost, sent_us, timeouts }
-  self.counters = { packets = 0, rejected = 0, pongs = 0, unpaired_pongs = 0, measurements = 0, failed = 0 }
+  self.measuring = nil -- { session_id, endpoint, points, prev_ghost, sent_us, timeouts, unusable, attempts, started_us }
+  self.counters = { packets = 0, rejected = 0, invalid_timelines = 0, pongs = 0, unpaired_pongs = 0,
+    measurements = 0, failed = 0, retries = 0, evicted_peers = 0, evicted_sessions = 0 }
   self.last = {}       -- state seen by the previous frame()
   return self
 end
@@ -50,7 +74,43 @@ end
 ------------------------------------------------------------------------------------------------------------------
 -- Packets
 
--- discovery/UdpMessenger.hpp and discovery/PeerGateway.hpp: Alive and Response update a peer, ByeBye removes it.
+local function valid_timeline(tl)
+  return math.type(tl.micros_per_beat) == "integer" and tl.micros_per_beat >= MIN_MPB and tl.micros_per_beat <= MAX_MPB
+    and math.abs(tl.beat_origin) <= MAX_ABS and math.abs(tl.time_origin) <= MAX_ABS
+end
+
+local function valid_start_stop(ss)
+  return ss == nil or (math.abs(ss.beats) <= MAX_ABS and math.abs(ss.timestamp) <= MAX_ABS)
+end
+F.valid_timeline = valid_timeline
+
+-- Removes the entry of `tbl` seen longest ago among those `protected` does not keep; returns its key, or nil when
+-- every entry is protected.
+local function evict_oldest(tbl, protected)
+  local oldest, key
+  for k, v in pairs(tbl) do
+    if not protected(k, v) and (not oldest or v.seen_us < oldest) then oldest, key = v.seen_us, k end
+  end
+  if key then tbl[key] = nil end
+  return key
+end
+
+function Follower:remove_peer(id)
+  if self.peers[id] then
+    self.peers[id] = nil
+    self.n_peers = self.n_peers - 1
+  end
+end
+
+function Follower:remove_session(id)
+  if self.sessions[id] then
+    self.sessions[id] = nil
+    self.n_sessions = self.n_sessions - 1
+  end
+end
+
+-- discovery/UdpMessenger.hpp and discovery/PeerGateway.hpp: Alive and Response update a peer, ByeBye removes it. A
+-- message whose timeline or start/stop state is out of range is rejected: the last valid state stays.
 function Follower:discovery(data, now_us)
   local P = self.P
   self.counters.packets = self.counters.packets + 1
@@ -60,45 +120,82 @@ function Follower:discovery(data, now_us)
     return
   end
   if m.type == P.BYEBYE then
-    self.peers[m.node_id] = nil
+    self:remove_peer(m.node_id)
     return
   end
   if not (m.session_id and m.timeline) then
     self.counters.rejected = self.counters.rejected + 1
     return
   end
-  local peer = self.peers[m.node_id] or {}
-  peer.session_id, peer.timeline, peer.start_stop = m.session_id, m.timeline, m.start_stop
-  peer.mep4 = m.mep4 or peer.mep4
-  peer.seen_us, peer.ttl_us = now_us, m.ttl * 1000000
-  self.peers[m.node_id] = peer
-  self.peers[m.node_id].node_id = m.node_id
+  if not (valid_timeline(m.timeline) and valid_start_stop(m.start_stop)) then
+    self.counters.rejected = self.counters.rejected + 1
+    self.counters.invalid_timelines = self.counters.invalid_timelines + 1
+    return
+  end
 
   local s = self.sessions[m.session_id]
   if not s then
+    if self.n_sessions >= MAX_SESSIONS then
+      -- the followed session and the one being measured are never evicted
+      local measuring = self.measuring and self.measuring.session_id
+      if not evict_oldest(self.sessions, function(k) return k == self.current or k == measuring end) then
+        self.counters.dropped = (self.counters.dropped or 0) + 1
+        return
+      end
+      self.n_sessions = self.n_sessions - 1
+      self.counters.evicted_sessions = self.counters.evicted_sessions + 1
+    end
     s = { timeline = m.timeline }
     self.sessions[m.session_id] = s
+    self.n_sessions = self.n_sessions + 1
   elseif m.timeline.beat_origin > s.timeline.beat_origin then
     s.timeline = m.timeline -- link/Sessions.hpp, updateTimeline: the larger beat origin wins
     if m.session_id == self.current then self.timeline_changed = true end
   end
+  s.seen_us = now_us
   -- link/Controller.hpp, handleStartStopStateFromSession: a newer timestamp wins
   if m.start_stop and (not s.start_stop or m.start_stop.timestamp > s.start_stop.timestamp) then
     s.start_stop = m.start_stop
   end
+
+  local peer = self.peers[m.node_id]
+  if not peer then
+    if self.n_peers >= MAX_PEERS then
+      -- peers of the followed session (and of the one being measured) are never evicted for newcomers
+      local measuring = self.measuring and self.measuring.session_id
+      if not evict_oldest(self.peers, function(_, p) return p.session_id == self.current or p.session_id == measuring end) then
+        self.counters.dropped = (self.counters.dropped or 0) + 1
+        return
+      end
+      self.n_peers = self.n_peers - 1
+      self.counters.evicted_peers = self.counters.evicted_peers + 1
+    end
+    peer = { node_id = m.node_id }
+    self.peers[m.node_id] = peer
+    self.n_peers = self.n_peers + 1
+  end
+  peer.session_id, peer.timeline, peer.start_stop = m.session_id, m.timeline, m.start_stop
+  peer.mep4 = m.mep4 or peer.mep4
+  peer.seen_us, peer.ttl_us = now_us, math.min(m.ttl * 1000000, MAX_TTL_US)
 end
 
--- Drops peers whose ttl has passed (discovery/PeerGateway.hpp, the prune timer) and sessions without peers.
+-- Drops peers whose ttl has passed (discovery/PeerGateway.hpp, the prune timer) and sessions without peers. When
+-- the followed session goes, the follower moves to the best surviving measured session at once.
 function Follower:prune(now_us)
   local alive = {}
   for id, p in pairs(self.peers) do
-    if now_us - p.seen_us > p.ttl_us then self.peers[id] = nil else alive[p.session_id] = true end
+    if now_us - p.seen_us > p.ttl_us then self:remove_peer(id) else alive[p.session_id] = true end
   end
   for id in pairs(self.sessions) do
-    if not alive[id] then self.sessions[id] = nil end
+    if not alive[id] then self:remove_session(id) end
   end
   if self.measuring and not self.sessions[self.measuring.session_id] then self.measuring = nil end
-  if self.current and not self.sessions[self.current] then self.current = nil end
+  if self.current and not self.sessions[self.current] then
+    self.current = nil
+    for id, s in pairs(self.sessions) do
+      if s.xform then self:choose_session(id, now_us) end
+    end
+  end
 end
 
 ------------------------------------------------------------------------------------------------------------------
@@ -116,20 +213,24 @@ function Follower:measurement_peer(session_id)
   return best
 end
 
--- The session that needs a measurement next: one never measured, or the current one after 30 s.
+-- The session that needs a measurement next: one never measured (a failed one once its retry time has come), or
+-- the current one after 30 s.
 function Follower:session_to_measure(now_us)
   local pick
   for id, s in pairs(self.sessions) do
-    if not s.xform and not s.failed and (not pick or id < pick) then pick = id end
+    if not s.xform and (not s.failed or now_us >= s.retry_us) and (not pick or id < pick) then pick = id end
   end
-  if pick then return pick end
+  if pick then
+    if self.sessions[pick].failed then self.counters.retries = self.counters.retries + 1 end
+    return pick
+  end
   local cur = self.current and self.sessions[self.current]
   if cur and cur.measured_us and now_us - cur.measured_us >= REMEASURE_US then return self.current end
   return nil
 end
 
--- The next ping to send, or nil. A ping that got no paired pong within 50 ms counts as a timeout; after 5 the
--- measurement fails.
+-- The next ping to send, or nil. A ping that got no paired pong within 50 ms counts as a timeout; the measurement
+-- fails after 5 timeouts, 20 paired pongs without data points, 300 pings or 2 s.
 function Follower:next_ping(now_us)
   local P = self.P
   local m = self.measuring
@@ -137,25 +238,29 @@ function Follower:next_ping(now_us)
     if now_us - m.sent_us < P.MEASUREMENT_TIMEOUT_US then return nil end
     m.timeouts = m.timeouts + 1
     m.sent_us = nil
-    if m.timeouts >= P.MEASUREMENT_RETRIES then
-      self:finish_measurement(now_us, nil)
-      return nil
-    end
+  end
+  if m and (m.timeouts >= P.MEASUREMENT_RETRIES or m.unusable >= MAX_UNUSABLE or m.attempts >= MAX_ATTEMPTS
+      or now_us - m.started_us > MEASURE_DEADLINE_US) then
+    self:finish_measurement(now_us, nil)
+    m = nil
   end
   if not m then
     local id = self:session_to_measure(now_us)
     if not id then return nil end
     local peer = self:measurement_peer(id)
     if not peer then return nil end
-    m = { session_id = id, endpoint = peer.mep4, points = {}, timeouts = 0 }
+    m = { session_id = id, endpoint = peer.mep4, points = {}, timeouts = 0, unusable = 0, attempts = 0,
+      started_us = now_us }
     self.measuring = m
   end
   m.sent_us = now_us
+  m.attempts = m.attempts + 1
   return { data = P.encode_ping(now_us, m.prev_ghost), address = m.endpoint.address, port = m.endpoint.port }
 end
 
 -- A packet on the measurement socket. Only a pong of the session being measured that echoes the last ping's host
--- time counts: a late pong of an earlier ping would skew the points (BS-04 saw a 15.9 ms receive).
+-- time counts: a late pong of an earlier ping would skew the points (BS-04 saw a 15.9 ms receive). A paired pong
+-- that brings no data points counts towards failing the measurement.
 function Follower:pong(data, now_us)
   local P = self.P
   local m = self.measuring
@@ -166,7 +271,9 @@ function Follower:pong(data, now_us)
     self.counters.unpaired_pongs = self.counters.unpaired_pongs + 1
     return
   end
-  for _, p in ipairs(P.measurement_points(pong, now_us)) do m.points[#m.points + 1] = p end
+  local got = P.measurement_points(pong, now_us)
+  if #got == 0 then m.unusable = m.unusable + 1 end
+  for _, p in ipairs(got) do m.points[#m.points + 1] = p end
   m.prev_ghost = pong.ghost
   m.sent_us = nil
   if #m.points > P.MEASUREMENT_POINTS then self:finish_measurement(now_us, P.ghost_xform(m.points)) end
@@ -183,15 +290,18 @@ function Follower:finish_measurement(now_us, xform)
     if s.xform and s.measured_us and now_us > s.measured_us then
       s.drift_us_per_min = (xform.intercept - s.xform.intercept) / ((now_us - s.measured_us) / 60e6)
     end
-    s.xform, s.measured_us, s.failed = xform, now_us, nil
+    s.xform, s.measured_us, s.failed, s.retry_us, s.backoff_us = xform, now_us, nil, nil, nil
     self.counters.measurements = self.counters.measurements + 1
     self:choose_session(m.session_id, now_us)
   else
     self.counters.failed = self.counters.failed + 1
-    if m.session_id == self.current then
+    if s.xform then
       s.measured_us = now_us -- keep following on the old transform; retry after the re-measure interval
     else
-      s.failed = true -- link/Sessions.hpp: a failed other session is forgotten until seen again
+      -- link/Sessions.hpp forgets a failed session until it is seen again; here it is retried while it is
+      -- announced, after a growing pause
+      s.backoff_us = math.min((s.backoff_us or RETRY_FIRST_US // 2) * 2, RETRY_MAX_US)
+      s.failed, s.retry_us = true, now_us + s.backoff_us
     end
   end
 end
@@ -336,14 +446,14 @@ function Follower:frame(now_us, frame_us, opts)
 end
 
 function Follower:status(now_us)
-  local n_peers, n_sessions = 0, 0
-  for _ in pairs(self.peers) do n_peers = n_peers + 1 end
-  for _ in pairs(self.sessions) do n_sessions = n_sessions + 1 end
+  local n_peers, n_sessions, failed = self.n_peers, self.n_sessions, 0
+  for _, s in pairs(self.sessions) do if s.failed then failed = failed + 1 end end
   local pos = self:position(now_us)
   return {
     state = pos and "following" or (n_peers > 0 and "measuring" or "no session"),
     peers = n_peers,
     sessions = n_sessions,
+    failed_sessions = failed, -- announced sessions whose measurement failed and is being retried
     session = pos and self.P.hex(pos.session_id) or nil,
     bpm = pos and pos.bpm or nil,
     beat = pos and pos.beat / 1e6 or nil,

@@ -375,5 +375,146 @@ for _, case in ipairs({ { late = 70000, reported = true }, { late = 150000, repo
   check((f.counters.missed_beats or 0) == 0, "not counted as missed")
 end
 
+------------------------------------------------------------------------------------------------------------------
+-- Review round 1 (PR #4)
+
+-- 1. Timelines out of range are rejected; the last valid state stays
+do
+  local A = peer("AAAAAAAA", { offset = 0, playing = true, port = 50001 })
+  local f = F.new(P)
+  for _, mpb in ipairs({ 0, -500000, 1, 60059, 3000001, math.maxinteger }) do
+    A.mpb = mpb
+    f:discovery(alive(A), 0)
+  end
+  check(f.n_sessions == 0 and f.n_peers == 0, "a session with only invalid timelines is not kept")
+  check(f.counters.invalid_timelines == 6, "invalid timelines counted: " .. tostring(f.counters.invalid_timelines))
+  A.mpb = 500000
+  f:discovery(alive(A), 10)
+  local t = measure(f, { [50001] = A }, 10)
+  f:frame(t, 16667)
+  A.mpb, A.beat_origin = 0, 2000000000 -- a larger beat origin would be adopted if it were valid
+  f:discovery(alive(A), t)
+  A.mpb, A.beat_origin, A.time_origin = 500000, 2 ^ 60, 0
+  f:discovery(alive(A), t)
+  check(f.sessions[A.session].timeline.micros_per_beat == 500000 and f.sessions[A.session].timeline.beat_origin == 0,
+    "invalid updates leave the last valid timeline")
+  local pos = f:position(t)
+  check(pos and pos.bpm == 120 and pos.beat == pos.beat and math.abs(pos.beat) < 2 ^ 53, "position stays finite at 120 bpm")
+  check(F.valid_timeline and F.valid_timeline({ micros_per_beat = 60060, beat_origin = 0, time_origin = 0 })
+    and F.valid_timeline({ micros_per_beat = 3000000, beat_origin = -2 ^ 53, time_origin = 2 ^ 53 }),
+    "the edges of the range are valid")
+end
+
+-- 3. When the followed session's last peer leaves, a surviving measured session is followed at once
+do
+  local A = peer("AAAAAAAA", { offset = 9000000, port = 50001 })
+  local B = peer("BBBBBBBB", { offset = 1000000, port = 50002 })
+  local f = F.new(P)
+  f:discovery(alive(A), 0)
+  f:discovery(alive(B), 0)
+  local t = measure(f, { [50001] = A, [50002] = B }, 0)
+  t = measure(f, { [50001] = A, [50002] = B }, t)
+  check(f.sessions[A.session] and f.sessions[A.session].xform and f.sessions[B.session].xform, "both sessions measured")
+  check(f.current == A.session, "A (8 s ahead) followed")
+  f:frame(t, 16667)
+  f:discovery(byebye(A), t)
+  local ev = f:frame(t + 16667, 16667)
+  check(f.current == B.session, "B followed after A left: " .. tostring(f.current))
+  local kinds = {}
+  for _, e in ipairs(ev) do kinds[#kinds + 1] = e.kind end
+  check(table.concat(kinds, ","):find("left,joined"), "left A, joined B: " .. table.concat(kinds, ","))
+  check(f:next_ping(t + 20000) == nil, "no new measurement needed")
+end
+
+-- 4. A failed first measurement is retried while the peer keeps announcing, with a growing pause
+do
+  local A = peer("AAAAAAAA", { offset = 3000000, port = 50001 })
+  local f = F.new(P)
+  local t = 0
+  f:discovery(alive(A), t)
+  for _ = 1, 6 do f:next_ping(t) t = t + 60000 end -- no replies
+  check(f.counters.failed == 1 and f.sessions[A.session].failed, "first measurement failed")
+  check(f:status(t).failed_sessions == 1, "the failure is reported")
+  check(f:next_ping(t) == nil, "no retry before the pause")
+  -- replies come back; announcements continue
+  for _ = 1, 10 do t = t + 250000 f:discovery(alive(A), t) end
+  t = measure(f, { [50001] = A }, t)
+  check(f.sessions[A.session].xform and f.current == A.session, "measured on the retry")
+  check((f.counters.retries or 0) >= 1, "the retry is counted")
+  check(f:status(t).failed_sessions == 0, "no failed session after the retry")
+  -- the pause doubles for repeated failures, up to 30 s
+  local g = F.new(P)
+  local u = 0
+  g:discovery(alive(A), u)
+  local pauses = {}
+  for _ = 1, 400 do
+    if g:next_ping(u) == nil and g.sessions[A.session] and g.sessions[A.session].failed then
+      local b = g.sessions[A.session].backoff_us
+      if pauses[#pauses] ~= b then pauses[#pauses + 1] = b end
+    end
+    u = u + 100000
+    if u % 1000000 == 0 then g:discovery(alive(A), u) end
+  end
+  check(pauses[1] == 1000000 and pauses[2] == 2000000 and pauses[3] == 4000000, "pauses 1, 2, 4 s: "
+    .. table.concat(pauses, ","))
+end
+
+-- 6. Paired pongs without data points fail the measurement, and the next session is served
+do
+  local A = peer("AAAAAAAA", { offset = 0, port = 50001 })
+  local B = peer("BBBBBBBB", { offset = 0, port = 50002 })
+  local f = F.new(P)
+  f:discovery(alive(A), 0)
+  f:discovery(alive(B), 0)
+  local t, exchanges = 0, 0
+  for _ = 1, 200 do
+    local ping = f:next_ping(t)
+    if not ping then break end
+    exchanges = exchanges + 1
+    if ping.port == 50001 then -- A answers without its ghost time: no data points
+      f:pong("_link_v\1\2" .. string.pack(">I4I4", 0x73657373, 8) .. A.session .. ping.data:sub(10), t + 100)
+    else
+      f:pong(pong_for(B, ping.data, t + 50), t + 100)
+    end
+    t = t + 150
+  end
+  check(f.counters.failed == 1, "A's measurement failed after unusable pongs: " .. f.counters.failed)
+  check(f.sessions[B.session].xform and f.current == B.session, "B was measured next and followed")
+  check(exchanges < 200, "the follower did not keep pinging A (" .. exchanges .. " exchanges)")
+end
+
+-- 7. The peer and session tables are capped; churn of new identities cannot grow them or the frame's work
+do
+  local A = peer("AAAAAAAA", { offset = 0, playing = true, port = 50001 })
+  local f = F.new(P)
+  f:discovery(alive(A), 0)
+  local t = measure(f, { [50001] = A }, 0)
+  for i = 1, 3000 do
+    local node = string.pack(">I8", 1000000 + i)
+    local x = peer(node, { session = string.pack(">I8", 5000000 + i % 500), ttl = 255, port = 50100 })
+    f:discovery(alive(x), t)
+    if i % 50 == 0 then f:discovery(alive(A), t) end -- the followed peer keeps announcing
+    t = t + 1000
+  end
+  check(f.n_peers and f.n_peers <= (F.MAX_PEERS or 64) and f.n_sessions <= (F.MAX_SESSIONS or 16), "tables capped: "
+    .. tostring(f.n_peers) .. " peers, " .. tostring(f.n_sessions) .. " sessions")
+  local np, ns = 0, 0
+  for _ in pairs(f.peers) do np = np + 1 end
+  for _ in pairs(f.sessions) do ns = ns + 1 end
+  check(np == f.n_peers and ns == f.n_sessions, "the counts match the tables")
+  check((f.counters.evicted_peers or 0) > 0 and (f.counters.evicted_sessions or 0) > 0, "evictions counted")
+  check(f.current == A.session and f.peers[A.node], "the followed session and its peer survive the churn")
+  -- one frame's work is bounded: run it under an instruction limit
+  local co = coroutine.create(function() f:frame(t, 16667) f:status(t) end)
+  debug.sethook(co, function() error("frame work unbounded", 0) end, "", 100000)
+  local ok, err = coroutine.resume(co)
+  check(ok, "a frame after the churn stays within 100000 instructions: " .. tostring(err))
+  -- ttls are honoured up to 30 s only
+  t = t + 31000000
+  f:discovery(alive(A), t)
+  f:frame(t, 16667)
+  check(f.n_peers == 1, "peers announcing a 255 s ttl are dropped after 30 s: " .. tostring(f.n_peers))
+end
+
 print(string.format("follower_test: %d checks, %d failures", checks, failures))
 if failures > 0 then os.exit(1) end
