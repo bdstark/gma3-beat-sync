@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   lua:
-    name: Lua 5.5 syntax, SPDX headers and harness
+    name: Lua 5.5 syntax, SPDX headers, harness and scripts
     runs-on: ubuntu-latest
     env:
       LUA_VERSION: 5.5.1
@@ -31,6 +31,7 @@ jobs:
       - run: scripts/check.sh spdx
       - run: scripts/check.sh lua
       - run: scripts/check.sh harness
+      - run: scripts/check.sh scripts
 
   peer:
     name: Test peer build, fixtures and vectors (Link submodule)

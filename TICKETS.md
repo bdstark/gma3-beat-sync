@@ -80,6 +80,14 @@ Questions:
 - A decision: a follower only, or a full peer (BS-03). Plus where status and configuration live; gma3-mcp builds
   on that interface.
 
+**Status:** probed 2026-10-16:
+[docs/probes/bs-01-follow-from-console-2026-10-16.md](docs/probes/bs-01-follow-from-console-2026-10-16.md).
+Decision: **a follower only**. A plugin answers pings once per frame (9.3 ms median round trip against 0.3 ms for a
+Link peer), which would put about 5 ms of error into every peer measuring through the console. The plugin runs a
+frame loop beside other plugins (`Timer()` as the fallback). Configuration and status live in console global
+variables `BeatSync.<Key>`, plus a shared Lua table; BS-02 fixes the names. A chase on a rate master drifts about
+2.5 ms a minute; a Go per beat holds it. `ReSync` does nothing to chases; phasers could not be observed on this onPC.
+
 ## BS-02 — Follower plugin
 
 **Request:** Follow a Link session's tempo, beat, bar and start/stop, and drive the show from it.
@@ -113,6 +121,8 @@ STARTSTOPSTATE-1 pass; leaving, rejoining and the ttl are handled. A show load e
 cannot restart itself; it reports `not running` and is started again by hand. Open: the cases against Ableton Live.
 
 ## BS-03 — Full peer (only if BS-01 shows it is safe)
+
+**Status:** not built. BS-01 showed that replies from a plugin are not prompt enough (see BS-01's status).
 
 **Request:** Appear as a Link peer, send start/stop and propose tempo changes from the console.
 

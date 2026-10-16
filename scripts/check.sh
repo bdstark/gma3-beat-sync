@@ -6,6 +6,7 @@
 #   scripts/check.sh lua      Lua 5.5 syntax check of every .lua file
 #   scripts/check.sh spdx     every source file carries the SPDX licence identifier
 #   scripts/check.sh harness  the Lua harness (test/lua/*_test.lua) under stock Lua 5.5
+#   scripts/check.sh scripts  node --check of every .mjs file, and the probe scripts' offline tests (needs node)
 #   scripts/check.sh peer     build the test tools from the Link submodule (tools/test-peer, modules/link) and
 #                             check the test peer's JSON lines (needs python3)
 #   scripts/check.sh fixtures every fixture's expect lines are what Link's parser reads (needs peer)
@@ -69,6 +70,19 @@ check_harness() {
   fi
 }
 
+check_scripts() {
+  count=0
+  for f in $(sources -name '*.mjs'); do
+    node --check "$f"
+    count=$((count + 1))
+  done
+  echo "scripts: $count .mjs file(s) parse"
+  for t in $(sources -name '*_test.mjs'); do
+    echo "scripts: $t"
+    node "$t"
+  done
+}
+
 check_peer() {
   if [ ! -f modules/link/CMakeLists.txt ]; then
     echo "error: modules/link is empty; run: git submodule update --init --recursive" >&2
@@ -113,9 +127,10 @@ case "${1:-all}" in
   lua) check_lua ;;
   spdx) check_spdx ;;
   harness) check_harness ;;
+  scripts) check_scripts ;;
   peer) check_peer ;;
   fixtures) check_fixtures ;;
   vectors) check_vectors ;;
-  all) check_spdx; check_lua; check_harness; check_peer; check_fixtures; check_vectors ;;
-  *) echo "usage: $0 [lua|spdx|harness|peer|fixtures|vectors|all]" >&2; exit 2 ;;
+  all) check_spdx; check_lua; check_harness; check_scripts; check_peer; check_fixtures; check_vectors ;;
+  *) echo "usage: $0 [lua|spdx|harness|scripts|peer|fixtures|vectors|all]" >&2; exit 2 ;;
 esac
