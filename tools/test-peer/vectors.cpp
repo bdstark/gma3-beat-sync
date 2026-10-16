@@ -8,7 +8,8 @@
 //
 // Integers are printed as integers; floating-point values with 17 significant digits. The inputs are fixed values
 // at the edges plus pseudo-random values from std::mt19937_64 with a fixed seed (its raw output is the same on
-// every platform; no std distribution is used).
+// every platform; no std distribution is used). Each pick() is its own statement, so the order of the draws does
+// not depend on the compiler's order of evaluating a call's arguments.
 //
 // Functions, from the Link source:
 //   include/ableton/link/Tempo.hpp                  Tempo(microseconds), bpm(), microsPerBeat()
@@ -159,9 +160,15 @@ void clientTimelineCases()
 {
   for (int i = 0; i < 100; ++i)
   {
-    const auto client = timeline(kMicrosPerBeat[i % 7], pick(-1000000000, 100000000000),
-                                 pick(0, 4000000000000));
-    const auto session = timeline(pick(60060, 3000000), pick(0, 100000000000), pick(-4000000000000, 8000000000000));
+    // One pick per statement: the order in which a call's arguments are evaluated is unspecified (GCC and clang
+    // differ), and the values must be the same on every compiler.
+    const auto clientBeatOrigin = pick(-1000000000, 100000000000);
+    const auto clientTimeOrigin = pick(0, 4000000000000);
+    const auto client = timeline(kMicrosPerBeat[i % 7], clientBeatOrigin, clientTimeOrigin);
+    const auto sessionMpb = pick(60060, 3000000);
+    const auto sessionBeatOrigin = pick(0, 100000000000);
+    const auto sessionTimeOrigin = pick(-4000000000000, 8000000000000);
+    const auto session = timeline(sessionMpb, sessionBeatOrigin, sessionTimeOrigin);
     const auto at = pick(0, 4000000000000);
     const auto x = GhostXForm{1.0, microseconds{pick(-4000000000000, 4000000000000)}};
     const auto r = updateClientTimelineFromSession(client, session, microseconds{at}, x);
