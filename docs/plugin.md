@@ -155,6 +155,11 @@ a session and so drive the tempo and the configured commands. Run it only on a n
 ## Compatibility
 
 The applicable cases of Link's [TEST-PLAN.md](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) for a
-follower are BEATTIME-1, BEATTIME-2 and STARTSTOPSTATE-1. They pass against a test peer built from the Link library
-(`gbs-test-peer`) on onPC 2.5.1. They have **not yet been run against Ableton Live**, so no compatibility with Link
-is claimed yet.
+follower are BEATTIME-1, BEATTIME-2 and STARTSTOPSTATE-1 (the last with `BeatSync.StartStop` `on`). On onPC 2.5.1:
+
+- **Against a test peer built from the Link library** (`gbs-test-peer`), all three pass
+  ([BS-02 record](probes/bs-02-follower-plugin-2026-10-16.md)).
+- **Against Ableton Live**, BEATTIME-2 and STARTSTOPSTATE-1 pass ([record](probes/bs-02-live-ableton-2026-10-16.md)).
+  BEATTIME-1 needs no session at all.
+  - Live ran on another computer, and its session reached the console's computer through a relay app (LinkMaster),
+    so the plugin measured the relay's peers rather than Live itself.

@@ -6,10 +6,10 @@ with its bars, and fires show actions on the beat. It runs entirely inside the c
 OSC or MIDI setup is needed.
 
 **Status:** in development. The plugin follows a session and drives a speed master, `ReSync` and commands on
-beats, bars, start and stop; see [docs/plugin.md](docs/plugin.md). It has been tested on grandMA3 onPC 2.5.1 against
-a test peer built from the Link library, where the follower cases of Link's
-[test plan](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) pass. It has not been tested against Ableton
-Live, and no compatibility is claimed until it has. The work is in [TICKETS.md](TICKETS.md).
+beats, bars, start and stop; see [docs/plugin.md](docs/plugin.md). On grandMA3 onPC 2.5.1, the follower cases of
+Link's [test plan](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) pass against a test peer built from the
+Link library and against Ableton Live, whose session was relayed to the console's computer by another app
+([record](docs/probes/bs-02-live-ableton-2026-10-16.md)). The work is in [TICKETS.md](TICKETS.md).
 
 ## How it works
 
