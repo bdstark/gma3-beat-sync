@@ -17,6 +17,12 @@
 //              and stop with it.
 //   leave      a peer that quits (ByeBye) or vanishes (no ByeBye, ttl), then comes back.
 //
+// --external 1 follows a session that is already on the network (an app such as Ableton Live) instead of starting
+// a test peer: timing checks the speed master against the session's own tempo; beattime runs BEATTIME-2 only (a test
+// peer joins the external session; BEATTIME-1 needs no session at all); startstop waits up to --wait-s seconds
+// (default 120) for the session to start, then for it to stop, while an operator presses Play and Stop in the app;
+// leave is not available.
+//
 // Prerequisites: onPC with a disposable show, gma3-mcp's bridge on 127.0.0.1:9800 with Lua enabled (the
 // development path for the observer and for reading status), the console lock, scripts/check.sh peer, the plugin
 // imported (scripts/install-plugin.sh, then Import Plugin Library "gma3_beat_sync.xml" At Plugin <empty slot>), and
@@ -32,7 +38,7 @@ import { lua, checkLock } from "./bridge.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
 const [scenario, ...rest] = process.argv.slice(2);
-const opts = { sequence: 950, master: 12, "lead-ms": 0, minutes: 2 };
+const opts = { sequence: 950, master: 12, "lead-ms": 0, minutes: 2, external: 0, "wait-s": 120 };
 for (let i = 0; i < rest.length; i += 2) opts[rest[i].replace(/^--/, "")] = Number(rest[i + 1]);
 if (!["timing", "beattime", "startstop", "leave"].includes(scenario)) {
   console.error("usage: plugin_live.mjs timing|beattime|startstop|leave [--sequence N] [--master N] [--lead-ms MS] [--minutes M]");
@@ -121,7 +127,9 @@ async function observe(frames) {
     if (frac >= 0.5) frac -= 1;
     return { t, cue, beat: Math.round(beat / 1e6), offsetMs: (frac * mpb) / 1000, barPos: ((Math.round(beat / 1e6) % 4) + 4) % 4 };
   });
-  return { changes, mpb, first: w.first, last: w.last };
+  const ss = w.start_stop ? w.start_stop.split(",").map(Number) : null;
+  return { changes, mpb, first: w.first, last: w.last,
+    startStop: ss && { playing: ss[0] === 1, beats: ss[1] / 1e6, timestamp: ss[2] } };
 }
 const mean = (a) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
 const sd = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((x) => (x - m) ** 2))); };
@@ -132,17 +140,25 @@ try {
   await clearConfig();
   if ((await status()).State && (await status()).State !== "stopped") await stopPlugin().catch(() => {});
 
+  if (opts.external && scenario === "leave") throw new Error("leave needs its own test peers; it has no --external form");
+
   if (scenario === "timing") {
-    const A = startPeer(["--tempo", "128", "--play"]);
-    peers.push(A);
-    await sleep(1500);
-    await setConfig({ Master: MASTER, OnBeat: `Go+ Sequence ${SEQ}`, LeadMs: opts["lead-ms"] });
+    if (!opts.external) {
+      const A = startPeer(["--tempo", "128", "--play"]);
+      peers.push(A);
+      await sleep(1500);
+    }
+    // an external session may be stopped: run the beat actions anyway (StartStop off)
+    await setConfig({ Master: MASTER, OnBeat: `Go+ Sequence ${SEQ}`, LeadMs: opts["lead-ms"],
+      StartStop: opts.external ? "off" : "on" });
     await startPlugin();
     await sleep(1500);
     const st = await status();
     check(st.State === "following", "the plugin follows the peer", st.State);
     const m = await masterState();
-    check(Math.abs(m.bpm - 128) < 0.01, "the speed master has the session tempo", +m.bpm.toFixed(4));
+    const sessionBpm = opts.external ? parseFloat(st.Tempo) : 128;
+    results.sessionBpm = sessionBpm;
+    check(Math.abs(m.bpm - sessionBpm) < 0.01, "the speed master has the session tempo", { master: +m.bpm.toFixed(4), session: sessionBpm });
     const windows = [];
     const start = Date.now();
     for (let k = 0; ; k++) {
@@ -170,7 +186,7 @@ try {
     check(st2.MissedBeats === "0", "no missed beats", st2.MissedBeats);
   }
 
-  if (scenario === "beattime") {
+  if (scenario === "beattime" && !opts.external) {
     // BEATTIME-1: no session
     const before = await masterState();
     const cue0 = await cueNow();
@@ -209,7 +225,82 @@ try {
     check(s2.MissedBeats === s1.MissedBeats, "BEATTIME-2: no beats missed across the join");
   }
 
-  if (scenario === "startstop") {
+  if (scenario === "beattime" && opts.external) {
+    // BEATTIME-2 against an external session: a test peer joins the session the plugin follows
+    await setConfig({ Master: MASTER, OnBeat: `Go+ Sequence ${SEQ}`, StartStop: "off" });
+    await startPlugin();
+    await sleep(2500);
+    const s0 = await status();
+    check(s0.State === "following", "following the external session", s0.State);
+    const w1 = await observe(180);
+    const s1 = await status();
+    const B = startPeer(["--tempo", "90"]);
+    peers.push(B);
+    await sleep(2000);
+    const w2 = await observe(180);
+    const s2 = await status();
+    check(Number(s2.Peers) === Number(s1.Peers) + 1, "BEATTIME-2: the joining peer is seen", { before: s1.Peers, after: s2.Peers });
+    check(s2.Tempo === s1.Tempo, "BEATTIME-2: the session keeps its tempo", { before: s1.Tempo, after: s2.Tempo });
+    const m1 = mean(w1.changes.map((c) => c.offsetMs)), m2 = mean(w2.changes.map((c) => c.offsetMs));
+    results.beattime2 = { tempo: s2.Tempo, before: { changes: w1.changes.length, meanMs: +m1.toFixed(2) }, after: { changes: w2.changes.length, meanMs: +m2.toFixed(2) } };
+    check(w1.changes.length >= 5 && w2.changes.length >= 5, "BEATTIME-2: beat actions before and after the join");
+    check(Math.abs(m2 - m1) < 6, "BEATTIME-2: no jump in the beat actions' lag when the peer joins (< 6 ms)", +(m2 - m1).toFixed(2));
+    check((s2.counters?.timeline_changes ?? 0) === (s1.counters?.timeline_changes ?? 0), "BEATTIME-2: the join does not change the session timeline");
+    check(s2.MissedBeats === s1.MissedBeats, "BEATTIME-2: no beats missed across the join");
+    // the joining test peer adopts the session's tempo, as Link peers do (TEMPO-2 from the other side)
+    const bTempo = B.events.filter((e) => e.ev === "tempo").at(-1);
+    results.beattime2.joiningPeerTempo = bTempo ? bTempo.bpm : null;
+  }
+
+  if (scenario === "startstop" && opts.external) {
+    // STARTSTOPSTATE-1 against an external session: an operator presses Play, then Stop, in the app
+    await setConfig({ OnBeat: `Go+ Sequence ${SEQ}`, StartStop: "on" });
+    await lua(`Cmd("Goto Sequence ${SEQ} Cue 4") coroutine.yield() Cmd("Off Sequence ${SEQ}") return 1`);
+    await startPlugin();
+    await sleep(2500);
+    const s0 = await status();
+    check(s0.State === "following", "following the external session", s0.State);
+    check(s0.Playing === "no", "the session is stopped at the start (press Play only when asked)", s0.Playing);
+    console.error("READY: press Play in the app now");
+    const deadline = Date.now() + opts["wait-s"] * 1000;
+    const windows = [];
+    let phase = "waiting for play", firstChange = null, playingSeenAt = null, stoppedSeenAt = null, startState = null;
+    while (Date.now() < deadline && phase !== "done") {
+      const w = await observe(180);
+      const st = await status();
+      windows.push({ at: new Date().toISOString(), changes: w.changes.length, playing: st.Playing, first: w.changes[0] });
+      console.error(JSON.stringify(windows.at(-1)));
+      if (phase === "waiting for play") {
+        if (w.changes.length > 0 || st.Playing === "yes") {
+          firstChange = w.changes[0] || null;
+          startState = w.startStop;
+          playingSeenAt = windows.length;
+          phase = "playing";
+          console.error("PLAYING: press Stop in the app after a few bars");
+        }
+      } else if (phase === "playing") {
+        if (st.Playing === "no") { stoppedSeenAt = windows.length; phase = "after stop"; }
+      } else if (phase === "after stop") {
+        phase = "done";
+      }
+    }
+    results.windows = windows;
+    check(playingSeenAt, "STARTSTOPSTATE-1: the session's start was seen");
+    // The session plays from its start beat (link/StartStopState.hpp beats); the first beat action is the first whole
+    // beat at or after it. That is a bar when the app started quantized; a relay may stamp another beat.
+    const startBeat = startState && startState.playing ? startState.beats : null;
+    const expected = startBeat === null ? null : Math.ceil(startBeat - 1e-6);
+    results.startBeat = startBeat;
+    check(firstChange && firstChange.cue === 1000 && firstChange.beat === expected,
+      "STARTSTOPSTATE-1: the first beat action is cue 1 on the first whole beat of the session's start", { firstChange, startBeat, expected });
+    results.startOnBar = startBeat !== null && Math.abs(startBeat / 4 - Math.round(startBeat / 4)) < 1e-6;
+    check(stoppedSeenAt, "STARTSTOPSTATE-1: the session's stop was seen");
+    const afterStop = stoppedSeenAt ? windows[stoppedSeenAt] : null; // the window after the one that saw the stop
+    check(afterStop && afterStop.changes === 0, "STARTSTOPSTATE-1: no beat actions after the stop", afterStop);
+    results.startstop = { firstChange, windowsWhilePlaying: stoppedSeenAt ? stoppedSeenAt - playingSeenAt : null };
+  }
+
+  if (scenario === "startstop" && !opts.external) {
     const A = startPeer(["--tempo", "120"]); // stopped
     peers.push(A);
     await sleep(1500);

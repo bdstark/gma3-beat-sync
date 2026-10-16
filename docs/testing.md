@@ -113,6 +113,10 @@ measurement of the session) places each cue change the plugin causes on the sess
 | `startstop` | Link STARTSTOPSTATE-1: no beat actions while stopped; after the peer plays, the first one is cue 1 on the start bar; none after it stops; `Playing` follows |
 | `leave` | a peer that quits is gone within 1.5 s (ByeBye); rejoining picks up the new tempo and rewrites the speed master; a peer that vanishes is dropped after its 5 s ttl |
 
+`--external 1` runs `timing`, `beattime` (BEATTIME-2) and `startstop` against a session already on the network,
+such as Ableton Live's, instead of a test peer; for `startstop` an operator presses Play, then Stop, in the app
+within `--wait-s` seconds. See the [Ableton Live record](probes/bs-02-live-ableton-2026-10-16.md).
+
 `follow_test_peer.mjs` starts a test peer, runs `test/live/follow_chunk.lua` (with the protocol module) inside the console for about
 two seconds, and compares the console's phase at each frame with the test peer's phase at the same wall-clock
 instant. It passes when every judged sample is within the tolerance (default 1 ms, `--tolerance-ms`), the tempo
