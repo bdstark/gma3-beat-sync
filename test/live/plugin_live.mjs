@@ -282,8 +282,8 @@ try {
       if (phase === "waiting for play" && (w.changes.length > 0 || st.Playing === "yes")) {
         phase = "playing";
         console.error("PLAYING: press Stop in the app after a few bars");
-      } else if (phase === "playing" && st.Playing === "no") {
-        phase = "after stop";
+      } else if (phase === "playing" && w.startStop && !w.startStop.playing) {
+        phase = "after stop"; // the session's own stop, decoded by the observer, not the plugin's status
       } else if (phase === "after stop") {
         phase = "done";
       }
@@ -295,7 +295,8 @@ try {
     check(j.started, "STARTSTOPSTATE-1: the session's start was seen");
     check(j.firstOk, "STARTSTOPSTATE-1: the first beat action is cue 1 on the first whole beat of the session's start",
       { firstChange: j.firstChange, startBeat: j.startState && j.startState.beats, expected: j.expectedFirstBeat });
-    check(j.stopped, "STARTSTOPSTATE-1: the session's stop was seen");
+    check(j.stopped, "STARTSTOPSTATE-1: the session's own stop was seen (decoded independently)", { stopEvidence: j.stopEvidence, stopState: j.stopState });
+    check(j.pluginStoppedOk, "STARTSTOPSTATE-1: the plugin reports the stop");
     check(j.noneAfterStop, "STARTSTOPSTATE-1: no beat actions after the stop", j.afterStop && { changes: j.afterStop.changes.length });
     results.startBeat = j.startState ? j.startState.beats : null;
     results.startOnBar = results.startBeat !== null && Math.abs(results.startBeat / 4 - Math.round(results.startBeat / 4)) < 1e-6;
