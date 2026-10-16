@@ -2,7 +2,7 @@
 
 ## Background
 
-These tickets come from a field test of [GrandMA3MCP](https://github.com/bdstark/GrandMA3MCP) on 2026-10-15. An
+These tickets come from a field test of [gma3-mcp](https://github.com/bdstark/gma3-mcp) on 2026-10-15. An
 operator asked an agent to switch lighting patterns after every fourth beat, with four measures between switches,
 synchronised to a Link session.
 
@@ -46,7 +46,7 @@ Identifiers are provisional. Each ticket follows the same workflow:
 
 - Community files: `CONTRIBUTING.md` (incoming contributions under GPL-2.0-or-later), `CODE_OF_CONDUCT.md`,
   `SECURITY.md` (the plugin opens UDP sockets on the console's network) and `ACCESSIBILITY.md`, modelled on
-  GrandMA3MCP's.
+  gma3-mcp's.
 - Issue and PR templates, repository description and topics, and branch protection on `main`.
 - CI: Lua syntax check (Lua 5.5, the console's version), the protocol harness, and the test peer build.
 - The Link library as a git submodule (`modules/link`, pinned to a release tag), with its license and its
@@ -65,7 +65,7 @@ Questions:
 - **Measurement.** Does a peer's measurement endpoint answer pings from a follower that never announced itself?
   How accurate is a measurement made with a bounded blocking receive inside one frame? Compare it against the test
   peer's own beat time.
-- **Two plugins.** Can this plugin's frame loop run alongside another plugin's loop, such as GrandMA3MCP's bridge?
+- **Two plugins.** Can this plugin's frame loop run alongside another plugin's loop, such as gma3-mcp's bridge?
   If not, can it use the console's `Timer()`?
 - **Shared state.** Where can the plugin publish its status and read its configuration so another plugin or the
   command line can see it? Console global variables, a shared Lua global, or show objects.
@@ -77,7 +77,7 @@ Questions:
 ### Acceptance criteria
 
 - A probe record answering each question, with the probe scripts.
-- A decision: a follower only, or a full peer (BS-03). Plus where status and configuration live; GrandMA3MCP builds
+- A decision: a follower only, or a full peer (BS-03). Plus where status and configuration live; gma3-mcp builds
   on that interface.
 
 ## BS-02 — Follower plugin

@@ -27,7 +27,7 @@ its beat.
 
 ## Related projects
 
-[GrandMA3MCP](https://github.com/bdstark/GrandMA3MCP), an MCP server for grandMA3, will read this plugin's status and
+[gma3-mcp](https://github.com/bdstark/gma3-mcp), an MCP server for grandMA3, will read this plugin's status and
 configure its actions. It talks to the plugin only through the console and shares no code with this repository.
 
 ## License

@@ -1,6 +1,6 @@
 # Probe: the console's Lua and UDP networking (2026-10-15)
 
-grandMA3 onPC 2.5.1 on macOS. The scripts below ran inside the console through GrandMA3MCP's bridge plugin (its
+grandMA3 onPC 2.5.1 on macOS. The scripts below ran inside the console through gma3-mcp's bridge plugin (its
 `lua` request), on a disposable show. No show data changed, and every socket was closed. No Link peer was running.
 
 ## Results
