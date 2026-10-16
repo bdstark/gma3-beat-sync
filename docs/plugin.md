@@ -7,6 +7,9 @@ compatible with Link™; see [Compatibility](#compatibility) for what has been t
 - Chosen sequences are realigned (`ReSync`) on every bar.
 - Commands run on beats, every N beats, on bars, and when the session starts, stops, is joined or is left. Each runs
   on the console frame nearest its beat.
+- By default the beat and bar commands follow the beat whether or not the session was started, because a beat
+  relayed into Link from a DJ booth (for example through ShowKontrol) may never send a start.
+  `BeatSync.StartStop` `on` makes them follow Ableton Live's Play and Stop instead.
 
 The plugin follows without announcing itself: other apps in the session do not see it, and it never changes the
 session's tempo or start/stop state. (A plugin cannot answer the other apps' clock measurements promptly enough to
@@ -59,7 +62,7 @@ The plugin reads them when it starts and every half second. A missing variable t
 | --- | --- | --- |
 | `BeatSync.Master` | (none) | Speed master 1–16 to set to the session's tempo (`Master 3.<n>`). It is written when the plugin joins a session, when this variable changes, after a show load and when the tempo moves by `TempoThreshold`; a refused write is tried again every second. Above 225 BPM, its SpeedScale is raised (Mul2, Mul4, Mul8); it is never lowered, and a scale the console does not take is reported (the tempo is then not written). |
 | `BeatSync.Quantum` | `4` | Beats per bar, 1–64. |
-| `BeatSync.StartStop` | `on` | `on`: beat and bar actions run only while the session plays; `off`: always. |
+| `BeatSync.StartStop` | `off` | `off`: beat and bar actions follow the beat whenever there is a session, whether or not it was started; `on`: only while the session plays (for sources that start and stop the session). `OnStart` and `OnStop` run either way when a start or stop arrives. |
 | `BeatSync.Resync` | (none) | Sequences to `ReSync` on every bar, separated by commas or spaces. |
 | `BeatSync.OnBar` | (none) | A command on every bar. |
 | `BeatSync.OnBeat` | (none) | A command on every beat. |
@@ -118,7 +121,8 @@ session …", "show loaded: …"), `frame_periods_us` (the last 120 frame period
 - **Chases on a speed master** follow its tempo, but on the console's own clock: they drift from the session by a
   few ms a minute (BS-01). For a chase that must stay on the beat, give its cues trigger Go and advance it with
   `BeatSync.OnBeat` or an `Action`.
-- **Starting.** When the session starts on a bar in the future (an app that starts quantized while other apps are in
+- **Starting** (with `BeatSync.StartStop` `on`; by default the beat actions do not wait for a start). When the
+  session starts on a bar in the future (an app that starts quantized while other apps are in
   its session), the first beat action runs on that bar. An app that is alone in its session (the plugin does not
   count, since it does not announce itself) starts at once; the plugin hears of it a few tens of ms later and runs
   the start's first beat action late, as soon as it knows (up to 100 ms late; later than that, it starts with the
