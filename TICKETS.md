@@ -125,7 +125,14 @@ DJ booth that never send a start.
 
 ## BS-03 — Full peer (only if BS-01 shows it is safe)
 
-**Status:** not built. BS-01 showed that replies from a plugin are not prompt enough (see BS-01's status).
+**Status:** implemented as an opt-in mode (`BeatSync.Mode` `peer`; the follower stays the default), documented in
+[docs/plugin.md](docs/plugin.md). The [BS-03 probe](docs/probes/bs-03-full-peer-probe-2026-10-16.md) reversed
+BS-01's "follower only": replies stamped for when each ping most likely arrived bring the error of a measuring
+peer from 8 ms to about 0.15 ms. Live on onPC 2.5.1 against the test peer
+([record](docs/probes/bs-03-peer-live-2026-10-16.md)): TEMPO-1, TEMPO-2, TEMPO-4, TEMPO-5 and STARTSTOPSTATE-2
+pass, and `play` and `pause` start and stop the test peer. A peer measuring the console's clock through the plugin
+is within 0.06 ms. TEMPO-3 is covered by TEMPO-2's restart into an existing session, because a show load ends the
+plugin's loop. Not run against Ableton Live: its session reaches this computer only through a relay.
 
 **Request:** Appear as a Link peer, send start/stop and propose tempo changes from the console.
 

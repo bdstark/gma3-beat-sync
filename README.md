@@ -9,7 +9,9 @@ OSC or MIDI setup is needed.
 beats, bars, start and stop; see [docs/plugin.md](docs/plugin.md). On grandMA3 onPC 2.5.1, the follower cases of
 Link's [test plan](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) pass against a test peer built from the
 Link library and against Ableton Live, whose session was relayed to the console's computer by another app
-([record](docs/probes/bs-02-live-ableton-2026-10-16.md)). The work is in [TICKETS.md](TICKETS.md).
+([record](docs/probes/bs-02-live-ableton-2026-10-16.md)). An opt-in peer mode lets the console take part in the
+session: its speed master's tempo and its start and stop reach the other apps. Its test plan cases pass against the
+test peer ([record](docs/probes/bs-03-peer-live-2026-10-16.md)). The work is in [TICKETS.md](TICKETS.md).
 
 ## How it works
 

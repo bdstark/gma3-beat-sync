@@ -1,0 +1,160 @@
+{
+  "scenario": "peer-tempo",
+  "checks": [
+    {
+      "ok": true,
+      "what": "TEMPO-5: peer mode, in its own session",
+      "detail": {
+        "ActiveMode": "peer",
+        "DroppedFrames": "0",
+        "State": "following",
+        "Peers": "1",
+        "Beat": "0.38",
+        "Tempo": "100.000",
+        "OwnSession": "yes",
+        "MissedBeats": "0",
+        "Playing": "no",
+        "Node": "63db393e97b2ef12",
+        "counters": {
+          "rejected": 0,
+          "pongs": 46,
+          "pings_answered": 52,
+          "invalid_timelines": 0,
+          "retries": 0,
+          "evicted_sessions": 0,
+          "unpaired_pongs": 0,
+          "measurements": 0,
+          "failed": 0,
+          "evicted_peers": 0,
+          "packets": 6
+        }
+      }
+    },
+    {
+      "ok": true,
+      "what": "TEMPO-5: the console's tempo stays 100",
+      "detail": "100.000"
+    },
+    {
+      "ok": false,
+      "what": "a joining test peer is in the console's session",
+      "detail": {
+        "ActiveMode": "peer",
+        "DroppedFrames": "4",
+        "State": "following",
+        "Peers": "2",
+        "Beat": "62.27",
+        "Tempo": "120.000",
+        "OwnSession": "no",
+        "MissedBeats": "0",
+        "Playing": "no",
+        "Node": "63db393e97b2ef12",
+        "counters": {
+          "rejected": 0,
+          "pongs": 52,
+          "pings_answered": 52,
+          "invalid_timelines": 0,
+          "retries": 0,
+          "evicted_sessions": 0,
+          "unpaired_pongs": 1,
+          "measurements": 1,
+          "failed": 0,
+          "evicted_peers": 0,
+          "packets": 64
+        }
+      }
+    },
+    {
+      "ok": false,
+      "what": "it takes the console's 100 (TEMPO-2 seen from the test peer)",
+      "detail": 120
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-5: stopping the plugin leaves the master's tempo"
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-2: the console joins the existing session at 130",
+      "detail": {
+        "ActiveMode": "peer",
+        "DroppedFrames": "10",
+        "State": "following",
+        "Peers": "2",
+        "Beat": "80.41",
+        "Tempo": "120.000",
+        "OwnSession": "no",
+        "MissedBeats": "0",
+        "Playing": "no",
+        "Node": "e50b72646e24948d",
+        "counters": {
+          "rejected": 0,
+          "pongs": 51,
+          "pings_answered": 104,
+          "invalid_timelines": 0,
+          "retries": 0,
+          "evicted_sessions": 0,
+          "unpaired_pongs": 0,
+          "measurements": 1,
+          "failed": 0,
+          "evicted_peers": 0,
+          "packets": 136
+        }
+      }
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-2: the master follows to 130"
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-2: the session's tempo is unchanged",
+      "detail": 120
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-1: the console's tempo change reaches the test peer",
+      "detail": 120
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-1: the test peer's change reaches the master",
+      "detail": "125.000"
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-4: 20 BPM reaches the master",
+      "detail": {
+        "tempo": "120.000",
+        "master": 120,
+        "scale": "One"
+      }
+    },
+    {
+      "ok": false,
+      "what": "TEMPO-4: 999 BPM reaches the master",
+      "detail": {
+        "tempo": "999.000",
+        "master": 120,
+        "scale": "Mul8"
+      }
+    }
+  ],
+  "ok": false,
+  "peerTempo": {
+    "testPeerTempoEvents": [
+      120,
+      130,
+      120,
+      139.999813,
+      120,
+      125,
+      120,
+      20,
+      120,
+      999,
+      120
+    ]
+  },
+  "masterRestored": true
+}

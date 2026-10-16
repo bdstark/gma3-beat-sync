@@ -1,0 +1,73 @@
+{
+  "runs": [
+    {
+      "console": {
+        "node": "035dc8e9e0d4fbb3",
+        "start": 1792149193296300,
+        "finish": 1792149197805100,
+        "frames": 269,
+        "peers": "27445a237d577c2b@035dc8e9e0d4fbb3",
+        "answered": 52,
+        "alive_sent": 18,
+        "mep_port": "58864",
+        "joined_at": 1792149194150100,
+        "pings": 52
+      },
+      "joined": true,
+      "joinedAfterMs": 837,
+      "judgedSamples": 608,
+      "errorMs": {
+        "mean": -0.14,
+        "min": -0.194,
+        "median": -0.14,
+        "max": -0.134
+      }
+    },
+    {
+      "console": {
+        "node": "d827509cba69fd7b",
+        "start": 1792149200791100,
+        "finish": 1792149205295600,
+        "frames": 268,
+        "peers": "5e456e3b736f4073@d827509cba69fd7b",
+        "answered": 52,
+        "alive_sent": 18,
+        "mep_port": "53811",
+        "joined_at": 1792149201174000,
+        "pings": 52
+      },
+      "joined": true,
+      "joinedAfterMs": 367,
+      "judgedSamples": 685,
+      "errorMs": {
+        "mean": -10.637,
+        "min": -10.652,
+        "median": -10.637,
+        "max": -10.631
+      }
+    },
+    {
+      "console": {
+        "node": "fd0d8915cb255b5f",
+        "start": 1792149208300900,
+        "finish": 1792149212804400,
+        "frames": 267,
+        "peers": "2e2521397c3e4c35@fd0d8915cb255b5f",
+        "answered": 52,
+        "alive_sent": 18,
+        "mep_port": "52712",
+        "joined_at": 1792149209140000,
+        "pings": 52
+      },
+      "joined": true,
+      "joinedAfterMs": 822,
+      "judgedSamples": 604,
+      "errorMs": {
+        "mean": -0.124,
+        "min": -0.13,
+        "median": -0.124,
+        "max": -0.119
+      }
+    }
+  ]
+}

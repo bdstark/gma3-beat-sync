@@ -1,0 +1,92 @@
+{
+  "scenario": "peer-startstop",
+  "checks": [
+    {
+      "ok": true,
+      "what": "the console joins the test peer's session",
+      "detail": {
+        "ActiveMode": "peer",
+        "DroppedFrames": "0",
+        "State": "following",
+        "Peers": "1",
+        "Beat": "7.58",
+        "Tempo": "120.000",
+        "OwnSession": "no",
+        "MissedBeats": "0",
+        "Playing": "no",
+        "Node": "f23658570ee7f68f",
+        "counters": {
+          "rejected": 0,
+          "pongs": 51,
+          "pings_answered": 52,
+          "invalid_timelines": 0,
+          "retries": 0,
+          "evicted_sessions": 0,
+          "unpaired_pongs": 0,
+          "measurements": 1,
+          "failed": 0,
+          "evicted_peers": 0,
+          "packets": 9
+        }
+      }
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-2: the console is not playing, the test peer plays on",
+      "detail": {
+        "console": "no",
+        "testPeer": true
+      }
+    },
+    {
+      "ok": true,
+      "what": "the console's stop stops the test peer",
+      "detail": false
+    },
+    {
+      "ok": true,
+      "what": "and the console reports stopped",
+      "detail": "no"
+    },
+    {
+      "ok": true,
+      "what": "the console's start starts the test peer",
+      "detail": true
+    },
+    {
+      "ok": true,
+      "what": "the start is on a bar of the session's grid",
+      "detail": {
+        "playing": true,
+        "beats": 12,
+        "timestamp": 4405864
+      }
+    },
+    {
+      "ok": true,
+      "what": "and the console reports playing",
+      "detail": "yes"
+    }
+  ],
+  "ok": true,
+  "peerStartStop": {
+    "events": [
+      {
+        "ev": "startstop",
+        "wall_us": 1792184564718423,
+        "playing": true
+      },
+      {
+        "ev": "startstop",
+        "wall_us": 1792184567641197,
+        "playing": false
+      },
+      {
+        "ev": "startstop",
+        "wall_us": 1792184568627264,
+        "playing": true
+      }
+    ]
+  },
+  "masterRestored": true
+}

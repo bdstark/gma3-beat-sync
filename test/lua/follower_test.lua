@@ -575,5 +575,145 @@ do
   check(pings == 0 and g.counters.failed == 0, "no pings and no failures for a session without an endpoint")
 end
 
+------------------------------------------------------------------------------------------------------------------
+-- Peer mode (BS-03)
+
+local NODE = "NODE0001"
+local function new_peer(t, bpm) return F.new(P, { quantum = 4, peer = { node_id = NODE, now_us = t, bpm = bpm or 120 } }) end
+
+-- A new peer founds its own session: node id = session id, ghost time 0 at the start (link/Controller.hpp)
+do
+  local f = new_peer(5000000, 133.5)
+  check(f.current == NODE and f.sessions[NODE].own, "the peer's current session is its own")
+  local pos = f:position(5000000)
+  check(pos and pos.beat == 0 and math.abs(pos.bpm - 133.5) < 0.001, "beat 0 at the start, at the given tempo")
+  local ev = f:frame(5000000, 16667, { always = true })
+  check(ev[1] and ev[1].kind == "joined" and ev[1].session_id == NODE, "joined its own session")
+  check(f:next_ping(5000000) == nil, "it never measures its own session")
+  -- its announcement reads back as Link's layout says
+  local a = P.decode_discovery(f:announcement(P.ALIVE, "127.0.0.1", 54000))
+  check(a and a.type == P.ALIVE and a.ttl == 5 and a.node_id == NODE and a.session_id == NODE, "Alive header and session")
+  check(a.timeline.micros_per_beat == P.micros_per_beat(133.5) and a.timeline.beat_origin == 0 and a.timeline.time_origin == 0,
+    "Alive timeline")
+  check(a.start_stop and a.start_stop.playing == false, "Alive start/stop state")
+  check(a.mep4 and a.mep4.address == "127.0.0.1" and a.mep4.port == 54000, "Alive measurement endpoint")
+  check(P.decode_discovery(f:announcement(P.RESPONSE, "10.0.0.5", 1)).type == P.RESPONSE, "Response")
+  local b = P.decode_discovery(f:announcement(P.BYEBYE, "127.0.0.1", 54000))
+  check(b and b.type == P.BYEBYE and b.node_id == NODE, "ByeBye")
+  -- its own messages coming back on the loopback are ignored
+  local before = f.n_peers
+  f:discovery(f:announcement(P.ALIVE, "127.0.0.1", 54000), 5100000)
+  check(f.n_peers == before, "its own Alive is ignored")
+end
+
+-- Pongs carry the current session and a ghost time stamped half way between the ping's earliest arrival and now
+do
+  local f = new_peer(1000000)
+  local ping = P.encode_ping(777, 555)
+  local pong = P.decode_measurement(f:answer_ping(ping, 2000000, 2016000))
+  check(pong and pong.type == P.PONG and pong.session_id == NODE, "pong of the current session")
+  check(pong.ghost == P.host_to_ghost(f.sessions[NODE].xform, 2008000), "ghost stamped at the midpoint: " .. tostring(pong.ghost))
+  check(pong.host == 777 and pong.prev_ghost == 555, "the ping's payload is echoed")
+  check(f:status(2016000).ghost_intercept_us == f.sessions[NODE].xform.intercept, "status reports the session's clock")
+  check(f:answer_ping(ping .. "x", 0, 1) == nil, "a ping too large for Link is not answered (link/PingResponder.hpp)")
+  check(f:answer_ping(P.encode_ping(1), 3000000, 2000000) ~= nil, "a bound after now is clamped")
+end
+
+-- The peer joins a session that is ahead (link/Sessions.hpp) and keeps it when all its peers leave
+do
+  local t = 1000000
+  local f = new_peer(t)
+  local A = peer("AAAAAAAA", { offset = 100000000, port = 50001, playing = true }) -- ghost 100 s ahead
+  f:discovery(alive(A), t)
+  t = measure(f, { [50001] = A }, t)
+  check(f.current == A.session, "joined the session that is ahead")
+  f:frame(t, 16667)
+  check(f.sessions[NODE] == nil and f.n_sessions == 1, "its own session is gone (no other member)")
+  local a = P.decode_discovery(f:announcement(P.ALIVE, "127.0.0.1", 1))
+  check(a.session_id == A.session and a.timeline.micros_per_beat == A.mpb, "it announces membership of A's session")
+  f:discovery(byebye(A), t + 1000)
+  f:frame(t + 20000, 16667)
+  check(f.current == A.session and f.sessions[A.session], "the session stays when A leaves: the peer is in it")
+  check(f:position(t + 20000) ~= nil, "and keeps its timeline")
+  -- a session that is behind is measured but not joined
+  local g = new_peer(1000000)
+  local B = peer("BBBBBBBB", { offset = -50000000, port = 50002 })
+  g:discovery(alive(B), 1000000)
+  measure(g, { [50002] = B }, 1000000)
+  check(g.current == NODE, "a session behind is not joined")
+end
+
+-- Another peer joins the peer's session; its larger beat origin wins, as anyone's would
+do
+  local t = 1000000
+  local f = new_peer(t)
+  local J = peer("JJJJJJJJ", { session = NODE, port = 50003, beat_origin = 5000000, time_origin = 2500000 })
+  f:discovery(alive(J), t)
+  f:frame(t + 16667, 16667)
+  check(f.current == NODE and f.n_peers == 1, "the joining peer is in the peer's session")
+  check(f.sessions[NODE].timeline.beat_origin == 5000000, "its timeline with the larger beat origin is adopted")
+  for _ = 1, 30 do t = t + 1000000 f:discovery(alive(J), t) f:frame(t, 16667) end
+  check(f.current == NODE and f.counters.measurements == 0, "the own session is kept and never measured")
+end
+
+-- Tempo proposals keep the beat at now and raise the beat origin; start begins on the next bar, stop at once
+do
+  local t = 1000000
+  local f = new_peer(t, 120)
+  t = t + 3250000 -- beat 6.5
+  local before = f:position(t).beat
+  check(f:propose_tempo(140, t), "tempo proposed")
+  local tl = f.sessions[NODE].timeline
+  local after = f:position(t)
+  check(math.abs(after.beat - before) <= 1, "the beat at now is kept: " .. before .. " -> " .. after.beat)
+  check(math.abs(after.bpm - 140) < 0.001 and tl.beat_origin > 0, "new tempo, larger beat origin")
+  local a = P.decode_discovery(f:announcement(P.ALIVE, "127.0.0.1", 1))
+  check(a.timeline.micros_per_beat == P.micros_per_beat(140) and a.timeline.beat_origin == tl.beat_origin, "announced")
+  -- a proposal right after another still raises the beat origin
+  check(f:propose_tempo(141, t) and f.sessions[NODE].timeline.beat_origin > tl.beat_origin, "a second proposal at the same time")
+  check(math.abs(f:position(t).beat - before) <= 2, "and still keeps the beat")
+  check(f:propose_tempo(5000, t) and math.abs(f:position(t).bpm - 999) < 0.01, "clamped to 999")
+  -- start: on the next bar (phase 0 of the 4-beat grid), stop: now, timestamps increasing
+  local g = new_peer(1000000, 120)
+  local u = 1000000 + 2600000 -- beat 5.2
+  g:propose_start_stop(true, u)
+  local ss = g.sessions[NODE].start_stop
+  check(ss.playing and ss.beats == 8000000, "start on the next bar (beat 8): " .. ss.beats)
+  local ts = ss.timestamp
+  g:propose_start_stop(false, u)
+  check(not g.sessions[NODE].start_stop.playing and g.sessions[NODE].start_stop.timestamp > ts, "stop, with a newer timestamp")
+  check(g.sessions[NODE].start_stop.beats == g:position(u).beat, "stop at now")
+end
+
+-- STARTSTOPSTATE-2: a peer that joins a playing session is not playing (link/Controller.hpp, joinSession) until a
+-- member starts or stops again; the follower (not a peer) reports the session's state as it is
+do
+  local t = 1000000
+  local f = new_peer(t)
+  local A = peer("AAAAAAAA", { offset = 100000000, port = 50001, playing = true, ss_time = 99000000 })
+  f:discovery(alive(A), t)
+  t = measure(f, { [50001] = A }, t)
+  check(f.current == A.session, "the peer joined A's playing session")
+  local pos = f:position(t)
+  check(pos and not pos.playing, "STARTSTOPSTATE-2: a peer joining a playing session is not playing")
+  local a = P.decode_discovery(f:announcement(P.ALIVE, "127.0.0.1", 1))
+  check(a.start_stop.playing == false and a.start_stop.timestamp == 0, "and announces the reset state, as Link does")
+  for _ = 1, 3 do t = t + 250000 f:discovery(alive(A), t) end
+  check(not f:position(t).playing, "A's unchanged state is not taken over")
+  -- A stops and starts again: newer states are taken over
+  A.playing, A.ss_time = false, 102000000
+  f:discovery(alive(A), t)
+  check(not f:position(t).playing and f.sessions[A.session].start_stop.timestamp == 102000000, "A's stop is taken over")
+  A.playing, A.ss_beats, A.ss_time = true, 0, 103000000
+  f:discovery(alive(A), t + 1000)
+  check(f:position(t + 1000).playing, "A's new start is taken over")
+  -- the follower joining the same session reports it as playing
+  local g = F.new(P, { quantum = 4 })
+  local B = peer("BBBBBBBB", { offset = 100000000, port = 50002, playing = true, ss_time = 99000000 })
+  g:discovery(alive(B), 1000000)
+  local u = measure(g, { [50002] = B }, 1000000)
+  check(g:position(u) and g:position(u).playing, "the follower reports a joined playing session as playing")
+end
+
 print(string.format("follower_test: %d checks, %d failures", checks, failures))
 if failures > 0 then os.exit(1) end

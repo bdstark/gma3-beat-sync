@@ -4,7 +4,8 @@
 -- Observer run inside the console by test/live/plugin_live.mjs, which prepends the protocol module as P and sets
 -- SEQ (a sequence number) and FRAMES. Independently of the plugin, it finds the session, measures it (as
 -- test/live/follow_chunk.lua does, with the same bounds) and records the sequence's current cue at the start of
--- every frame for FRAMES frames. Returns the session timeline, the ghost-host intercept and each cue change with
+-- every frame for FRAMES frames. SKIP_NODE (16 hex digits, optional) is a peer not to measure: the plugin under
+-- test in peer mode, whose replies come once per console frame and miss the observer's 3 ms receives. Returns the session timeline, the ghost-host intercept and each cue change with
 -- its wall-clock time, so the test can place the plugin's actions on the session's beat grid.
 
 local socket = require("socket")
@@ -33,7 +34,8 @@ while not peer and now_us() - t0 < 1500000 do
     local d = mc:receivefrom()
     if not d then break end
     local m = P.decode_discovery(d)
-    if m and m.type ~= P.BYEBYE and m.mep4 and m.timeline and m.session_id then peer = m break end
+    if m and m.type ~= P.BYEBYE and m.mep4 and m.timeline and m.session_id
+      and not (SKIP_NODE and P.hex(m.node_id) == SKIP_NODE) then peer = m break end
   end
   if not peer then coroutine.yield() end
 end
@@ -83,9 +85,11 @@ if not xform or #points <= P.MEASUREMENT_POINTS then
     #points, timeouts, unusable, late, attempts) })
 end
 
-local seq = DataPool().Sequences[SEQ]
-if not seq then return finish({ error = "no sequence " .. SEQ }) end
+-- SEQ 0: no sequence to watch (the session's state only)
+local seq = SEQ ~= 0 and DataPool().Sequences[SEQ] or nil
+if SEQ ~= 0 and not seq then return finish({ error = "no sequence " .. SEQ }) end
 local function current_cue()
+  if not seq then return -1 end
   local c = seq.CurrentCue
   return c and c.no or -1
 end
@@ -120,7 +124,8 @@ end
 return finish({
   timeline = string.format("%d,%d,%d", peer.timeline.micros_per_beat, peer.timeline.beat_origin,
     peer.timeline.time_origin),
-  intercept = xform.intercept,
+  -- as text: the bridge returns numbers to about 14 digits, which loses the last two of a 16-digit microsecond value
+  intercept = string.format("%d", xform.intercept),
   changes = table.concat(changes, ","),
   start_stop = peer.start_stop and string.format("%d,%d,%d", peer.start_stop.playing and 1 or 0,
     peer.start_stop.beats, peer.start_stop.timestamp) or nil,

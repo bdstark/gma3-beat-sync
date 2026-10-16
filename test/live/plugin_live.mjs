@@ -16,6 +16,14 @@
 //   startstop  Link TEST-PLAN STARTSTOPSTATE-1: beat actions start on the session's quantized start (the next bar)
 //              and stop with it.
 //   leave      a peer that quits (ByeBye) or vanishes (no ByeBye, ttl), then comes back.
+//   peer-tempo     BS-03, the console as a full peer (Mode peer, Interfaces 127.0.0.1): TEMPO-5 (alone, it keeps
+//                  its master's tempo), a test peer joining the console's session takes its tempo, TEMPO-2 (started
+//                  into an existing session, the console takes that tempo), TEMPO-1 (tempo changes both ways),
+//                  TEMPO-4 (20 and 999 BPM).
+//   peer-startstop BS-03, STARTSTOPSTATE-2: the console joins a playing session without playing; then its "pause"
+//                  stops the test peer and its "play" starts it.
+//                  Both need a network without other Link apps: a peer can change their session. They need no
+//                  chase: --sequence 0 runs them without one.
 //
 // --external 1 follows a session that is already on the network (an app such as Ableton Live) instead of starting
 // a test peer: timing checks the speed master against the session's own tempo; beattime runs BEATTIME-2 only (a test
@@ -41,8 +49,8 @@ const root = join(here, "..", "..");
 const [scenario, ...rest] = process.argv.slice(2);
 const opts = { sequence: 950, master: 12, "lead-ms": 0, minutes: 2, external: 0, "wait-s": 120 };
 for (let i = 0; i < rest.length; i += 2) opts[rest[i].replace(/^--/, "")] = Number(rest[i + 1]);
-if (!["timing", "beattime", "startstop", "leave"].includes(scenario)) {
-  console.error("usage: plugin_live.mjs timing|beattime|startstop|leave [--sequence N] [--master N] [--lead-ms MS] [--minutes M]");
+if (!["timing", "beattime", "startstop", "leave", "peer-tempo", "peer-startstop"].includes(scenario)) {
+  console.error("usage: plugin_live.mjs timing|beattime|startstop|leave|peer-tempo|peer-startstop [--sequence N] [--master N] [--lead-ms MS] [--minutes M]");
   process.exit(2);
 }
 checkLock();
@@ -52,7 +60,7 @@ const protocol = readFileSync(join(root, "plugin", "beat_sync_protocol.lua"), "u
 const observer = readFileSync(join(here, "observe_chunk.lua"), "utf8");
 const peerBin = join(root, process.env.BUILD_DIR ?? "build", "tools", "bin", "gbs-test-peer");
 const SEQ = opts.sequence, MASTER = opts.master;
-const CONFIG_KEYS = ["Master", "OnBeat", "OnBar", "OnStart", "OnStop", "OnJoin", "OnLeave", "LeadMs", "StartStop", "Resync", "Quantum"];
+const CONFIG_KEYS = ["Master", "OnBeat", "OnBar", "OnStart", "OnStop", "OnJoin", "OnLeave", "LeadMs", "StartStop", "Resync", "Quantum", "Mode", "Interfaces"];
 
 const results = { scenario, checks: [], ok: true };
 function check(ok, what, detail) {
@@ -70,7 +78,8 @@ async function clearConfig() {
   await lua(CONFIG_KEYS.map((k) => `DelVar(GlobalVars(), ${luaStr("BeatSync." + k)})`).join("\n") + "\nreturn 1");
 }
 async function status() {
-  const keys = ["State", "Peers", "Tempo", "Beat", "Playing", "LastAction", "MissedBeats", "DroppedFrames", "Problems", "Error"];
+  const keys = ["State", "Peers", "Tempo", "Beat", "Playing", "LastAction", "MissedBeats", "DroppedFrames", "Problems", "Error",
+    "ActiveMode", "OwnSession", "Node"];
   const [v, counters] = await lua(`local g = GlobalVars() local r = {}
 for _, k in ipairs(${JSON.stringify(keys).replace("[", "{").replace("]", "}")}) do r[k] = (GetVar(g, "BeatSync." .. k)) end
 return r, BeatSync and BeatSync.status and BeatSync.status.counters`);
@@ -87,7 +96,10 @@ async function stopPlugin() {
 }
 async function masterState() {
   const [f, scale] = await lua(`local m = ShowData().Masters.Speed[${MASTER}] return m:GetFader({}), m:Get("SpeedScale", Enums.Roles.Display)`);
-  return { fader: f, scale, bpm: 225 * Math.pow(f / 100, Math.log2(3.75)) };
+  // the fader's base tempo times the SpeedScale (One, MulN, DivN), as the plugin reads it (master_bpm)
+  const n = /^Mul(\d+)$/.exec(scale), d = /^Div(\d+)$/.exec(scale);
+  const factor = n ? Number(n[1]) : d ? 1 / Number(d[1]) : 1;
+  return { fader: f, scale, bpm: 225 * Math.pow(f / 100, Math.log2(3.75)) * factor };
 }
 async function cueNow() {
   const [c] = await lua(`local s = DataPool().Sequences[${SEQ}] local c = s and s.CurrentCue return c and c.no or -1`);
@@ -116,20 +128,22 @@ async function quitPeer(p) {
 
 // Runs the observer for `frames` frames; returns each cue change with its offset from the nearest session beat
 // and its position in the bar (quantum 4).
-async function observe(frames) {
-  const code = `local P = (function(...)\n${protocol}\nend)()\nlocal SEQ, FRAMES = ${SEQ}, ${frames}\n${observer}`;
+async function observe(frames, skipNode) {
+  const code = `local P = (function(...)\n${protocol}\nend)()\nlocal SEQ, FRAMES = ${SEQ}, ${frames}\n`
+    + `local SKIP_NODE = ${skipNode ? luaStr(skipNode) : "nil"}\n${observer}`;
   const [w] = await lua(code);
   if (w.error) throw new Error("observer: " + w.error);
   const [mpb, bo, to] = w.timeline.split(",").map(Number);
+  const intercept = Number(w.intercept); // sent as text (exact); a Number holds it exactly (< 2^53)
   const changes = (w.changes ? w.changes.split(",") : []).map((c) => {
     const [t, cue] = c.split(":").map(Number);
-    const beat = bo + ((t + w.intercept - to) / mpb) * 1e6;
+    const beat = bo + ((t + intercept - to) / mpb) * 1e6;
     let frac = (beat % 1e6) / 1e6;
     if (frac >= 0.5) frac -= 1;
     return { t, cue, beat: Math.round(beat / 1e6), offsetMs: (frac * mpb) / 1000, barPos: ((Math.round(beat / 1e6) % 4) + 4) % 4 };
   });
   const ss = w.start_stop ? w.start_stop.split(",").map(Number) : null;
-  return { changes, mpb, first: w.first, last: w.last,
+  return { changes, mpb, intercept, first: w.first, last: w.last,
     startStop: ss && { playing: ss[0] === 1, beats: ss[1] / 1e6, timestamp: ss[2] } };
 }
 const mean = (a) => a.reduce((x, y) => x + y, 0) / (a.length || 1);
@@ -337,6 +351,101 @@ try {
     results.startstop = { firstChange, changesAfterPlay: w1.changes.length, changesAfterStop: late.length };
   }
 
+  async function waitFor(pred, ms = 6000, step = 250) {
+    for (let t = 0; t < ms; t += step) { const st = await status(); if (pred(st)) return st; await sleep(step); }
+    return status();
+  }
+  const lastTempo = (p) => { const e = p.events.filter((x) => x.ev === "tempo").at(-1); return e ? e.bpm : null; };
+  const lastPlaying = (p) => { const e = p.events.filter((x) => x.ev === "startstop").at(-1); return e ? e.playing : null; };
+  async function setMaster(bpm) { await lua(`Cmd("Master 3.${MASTER} At BPM ${bpm}") return 1`); await sleep(300); }
+
+  if (scenario === "peer-tempo") {
+    await setMaster(100);
+    await setConfig({ Mode: "peer", Interfaces: "127.0.0.1", Master: MASTER });
+    // TEMPO-5: no session to join: the console founds its own at the master's tempo, and the master stays
+    await startPlugin();
+    let st = await waitFor((x) => x.State === "following", 4000);
+    check(st.ActiveMode === "peer" && st.OwnSession === "yes", "TEMPO-5: peer mode, in its own session", st);
+    check(st.Tempo === "100.000" && Math.abs((await masterState()).bpm - 100) < 0.01, "TEMPO-5: the console's tempo stays 100", st.Tempo);
+    // a Link peer opened now joins the console's session (it is ahead) and takes its tempo
+    const A = startPeer(["--tempo", "130"]);
+    peers.push(A);
+    await sleep(3000);
+    st = await status();
+    check(st.Peers === "1" && st.OwnSession === "yes", "a joining test peer is in the console's session", st);
+    check(Math.abs(lastTempo(A) - 100) < 0.01, "it takes the console's 100 (TEMPO-2 seen from the test peer)", lastTempo(A));
+    // The test peer measured the console's clock through the plugin's pongs. The observer measures the test peer's
+    // clock (ghost = host + intercept); the console's own is exact. Their difference is the test peer's error.
+    results.peerClockErrorMs = [];
+    for (let i = 0; i < 3; i++) {
+      const w = await observe(5, st.Node);
+      const [own] = await lua(`return string.format("%d", BeatSync.status.ghost_intercept_us)`); // text: exact
+      results.peerClockErrorMs.push(+((w.intercept - Number(own)) / 1000).toFixed(3));
+    }
+    check(results.peerClockErrorMs.every((e) => Math.abs(e) < 1), "the test peer's clock is within 1 ms of the console's",
+      results.peerClockErrorMs);
+    // TEMPO-2: the console starts into an existing session at 130: it joins it and its master follows
+    await stopPlugin();
+    check(Math.abs((await masterState()).bpm - 100) < 0.01, "TEMPO-5: stopping the plugin leaves the master's tempo");
+    A.send("tempo 130");
+    await sleep(1500);
+    await setMaster(90);
+    await startPlugin();
+    st = await waitFor((x) => x.OwnSession === "no" && x.Tempo === "130.000", 6000);
+    check(st.OwnSession === "no" && st.Tempo === "130.000", "TEMPO-2: the console joins the existing session at 130", st);
+    await sleep(800);
+    check(Math.abs((await masterState()).bpm - 130) < 0.01, "TEMPO-2: the master follows to 130");
+    check(Math.abs(lastTempo(A) - 130) < 0.01, "TEMPO-2: the session's tempo is unchanged", lastTempo(A));
+    // TEMPO-1: the operator moves the master; the test peer follows. The test peer changes it; the master follows.
+    await setMaster(140);
+    await sleep(1500);
+    check(Math.abs(lastTempo(A) - 140) < 0.01, "TEMPO-1: the console's tempo change reaches the test peer", lastTempo(A));
+    A.send("tempo 125");
+    st = await waitFor((x) => x.Tempo === "125.000", 3000);
+    await sleep(800);
+    check(st.Tempo === "125.000" && Math.abs((await masterState()).bpm - 125) < 0.01, "TEMPO-1: the test peer's change reaches the master", st.Tempo);
+    // TEMPO-4: the range ends
+    for (const bpm of [20, 999]) {
+      A.send(`tempo ${bpm}`);
+      st = await waitFor((x) => Math.abs(parseFloat(x.Tempo) - bpm) < 0.01, 3000);
+      await sleep(800);
+      const m = await masterState();
+      check(Math.abs(parseFloat(st.Tempo) - bpm) < 0.01 && Math.abs(m.bpm - bpm) < 0.05, `TEMPO-4: ${bpm} BPM reaches the master`, { tempo: st.Tempo, master: +m.bpm.toFixed(3), scale: m.scale });
+    }
+    results.peerTempo = { testPeerTempoEvents: A.events.filter((e) => e.ev === "tempo").map((e) => e.bpm) };
+  }
+
+  if (scenario === "peer-startstop") {
+    const A = startPeer(["--tempo", "120", "--play"]);
+    peers.push(A);
+    await sleep(2000);
+    await setConfig({ Mode: "peer", Interfaces: "127.0.0.1" });
+    await startPlugin();
+    let st = await waitFor((x) => x.OwnSession === "no", 6000);
+    check(st.OwnSession === "no", "the console joins the test peer's session", st);
+    // STARTSTOPSTATE-2: joining a playing session, the console is not playing while the test peer plays on
+    await sleep(1000);
+    st = await status();
+    check(st.Playing === "no" && lastPlaying(A) !== false, "STARTSTOPSTATE-2: the console is not playing, the test peer plays on",
+      { console: st.Playing, testPeer: lastPlaying(A) });
+    // a stop from the console stops the test peer
+    await lua(`CmdIndirect('Plugin "gma3_beat_sync" "pause"') return 1`);
+    await sleep(1000);
+    check(lastPlaying(A) === false, "the console's stop stops the test peer", lastPlaying(A));
+    st = await status();
+    check(st.Playing === "no", "and the console reports stopped", st.Playing);
+    // start from the console starts the test peer (on the next bar of the session)
+    await lua(`CmdIndirect('Plugin "gma3_beat_sync" "play"') return 1`);
+    await sleep(3000);
+    check(lastPlaying(A) === true, "the console's start starts the test peer", lastPlaying(A));
+    const w = await observe(30, st.Node); // measured through the test peer, not the console
+    check(w.startStop && w.startStop.playing && Math.abs(w.startStop.beats / 4 - Math.round(w.startStop.beats / 4)) < 1e-6,
+      "the start is on a bar of the session's grid", w.startStop);
+    st = await status();
+    check(st.Playing === "yes", "and the console reports playing", st.Playing);
+    results.peerStartStop = { events: A.events.filter((e) => e.ev === "startstop") };
+  }
+
   if (scenario === "leave") {
     await setConfig({ Master: MASTER });
     const A = startPeer(["--tempo", "120", "--play"]);
@@ -369,7 +478,7 @@ try {
 } finally {
   for (const p of peers) await quitPeer(p);
   await stopPlugin().catch(() => {});
-  await lua(`Cmd("Off Sequence ${SEQ}") return 1`).catch(() => {});
+  if (SEQ) await lua(`Cmd("Off Sequence ${SEQ}") return 1`).catch(() => {});
   await lua(`local m = ShowData().Masters.Speed[${MASTER}] m:Set("SpeedScale", "${savedMaster.scale}") m:SetFader({ value = ${savedMaster.fader} }) return 1`).catch(() => {});
   await clearConfig().catch(() => {});
   await sleep(300);
