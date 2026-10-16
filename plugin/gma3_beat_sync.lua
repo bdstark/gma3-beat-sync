@@ -51,7 +51,8 @@ shared.version = VERSION
 local DEFAULTS = {
   Master = "",              -- speed master 1..16 to set to the session tempo; empty: none
   Quantum = "4",            -- beats per bar
-  StartStop = "on",         -- on: beat and bar actions run only while the session plays; off: always
+  StartStop = "off",        -- off: beat and bar actions run whenever there is a session (sources such as a DJ booth
+                            -- relayed into Link may never send a start); on: only while the session plays
   Resync = "",              -- sequences to ReSync on each bar, e.g. "1, 5, 12"
   OnBar = "",               -- a command on each bar
   OnBeat = "",              -- a command on each beat
@@ -89,7 +90,7 @@ local function read_config()
     problems[#problems + 1] = "Quantum must be a number of beats from 1 to 64, not '" .. c.Quantum .. "'"
     c.quantum = 4
   end
-  c.start_stop = c.StartStop:lower() ~= "off"
+  c.start_stop = c.StartStop:lower() == "on"
   c.threshold = tonumber(c.TempoThreshold) or 0.01
   c.lead_us = math.floor((tonumber(c.LeadMs) or 0) * 1000 + 0.5)
 

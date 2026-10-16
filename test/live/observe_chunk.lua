@@ -39,25 +39,37 @@ while not peer and now_us() - t0 < 1500000 do
 end
 if not peer then return finish({ error = "no peer" }) end
 
-local points, prev, timeouts, unusable, attempts = {}, nil, 0, 0, 0
+-- Peers that answer slowly (a relay such as LinkMaster answered in 1-2 ms, sometimes 30 ms, against 0.3 ms for a
+-- Link test peer) miss many 3 ms receives; the observer then needs more timeouts and late (unpaired) replies before
+-- it gives up. It stays within 1.2 s so the whole chunk fits the bridge's 5 s request budget.
+local points, prev, timeouts, unusable, attempts, late = {}, nil, 0, 0, 0, 0
 local m_start, f_start, in_frame = now_us(), now_us(), 0
-while #points <= P.MEASUREMENT_POINTS and timeouts < 5 and unusable < 20 and attempts < 300
-  and now_us() - m_start < 1000000 do
+while #points <= P.MEASUREMENT_POINTS and timeouts < 60 and unusable < 120 and attempts < 400
+  and now_us() - m_start < 1200000 do
   attempts = attempts + 1
   local sent = now_us()
   uc:sendto(P.encode_ping(sent, prev), peer.mep4.address, peer.mep4.port)
-  local d = uc:receive()
-  local received = now_us()
-  local pong = d and P.decode_measurement(d)
-  if not d then
+  -- read until this ping's pong or 3 ms: late pongs of earlier pings are skipped (and counted), so one slow reply
+  -- does not make every later exchange read the previous ping's pong
+  local pong, received
+  while true do
+    local left = 0.003 - (now_us() - sent) / 1e6
+    if left <= 0 then break end
+    uc:settimeout(left)
+    local d = uc:receive()
+    if not d then break end
+    received = now_us()
+    local m = P.decode_measurement(d)
+    if m and m.type == P.PONG and m.session_id == peer.session_id and m.host == sent then pong = m break end
+    late = late + 1
+  end
+  if not pong then
     timeouts = timeouts + 1
-  elseif pong and pong.type == P.PONG and pong.session_id == peer.session_id and pong.host == sent then
+  else
     local got = P.measurement_points(pong, received)
     if #got == 0 then unusable = unusable + 1 end
     for _, p in ipairs(got) do points[#points + 1] = p end
     prev = pong.ghost
-  else
-    unusable = unusable + 1
   end
   in_frame = in_frame + 1
   if in_frame >= 10 or now_us() - f_start >= 4000 then
@@ -66,7 +78,10 @@ while #points <= P.MEASUREMENT_POINTS and timeouts < 5 and unusable < 20 and att
   end
 end
 local xform = P.ghost_xform(points)
-if not xform or #points <= P.MEASUREMENT_POINTS then return finish({ error = "measurement failed" }) end
+if not xform or #points <= P.MEASUREMENT_POINTS then
+  return finish({ error = string.format("measurement failed (%d points, %d timeouts, %d unusable, %d late, %d pings)",
+    #points, timeouts, unusable, late, attempts) })
+end
 
 local seq = DataPool().Sequences[SEQ]
 if not seq then return finish({ error = "no sequence " .. SEQ }) end
@@ -87,6 +102,11 @@ for _ = 1, FRAMES do
     if m and m.session_id == peer.session_id and m.timeline and m.timeline.beat_origin > peer.timeline.beat_origin then
       peer.timeline = m.timeline
     end
+    -- and the newest start/stop state (link/Controller.hpp: a newer timestamp wins)
+    if m and m.session_id == peer.session_id and m.start_stop
+      and (not peer.start_stop or m.start_stop.timestamp > peer.start_stop.timestamp) then
+      peer.start_stop = m.start_stop
+    end
   end
   local h = now_us()
   local cue = current_cue()
@@ -102,6 +122,8 @@ return finish({
     peer.timeline.time_origin),
   intercept = xform.intercept,
   changes = table.concat(changes, ","),
+  start_stop = peer.start_stop and string.format("%d,%d,%d", peer.start_stop.playing and 1 or 0,
+    peer.start_stop.beats, peer.start_stop.timestamp) or nil,
   first = first,
   last = now_us(),
 })
