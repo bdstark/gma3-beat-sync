@@ -11,9 +11,19 @@ compatible with Link™; see [Compatibility](#compatibility) for what has been t
   relayed into Link from a DJ booth (for example through ShowKontrol) may never send a start.
   `BeatSync.StartStop` `on` makes them follow Ableton Live's Play and Stop instead.
 
-The plugin follows without announcing itself: other apps in the session do not see it, and it never changes the
-session's tempo or start/stop state. (A plugin cannot answer the other apps' clock measurements promptly enough to
-take part as a full peer; see the [BS-01 record](probes/bs-01-follow-from-console-2026-10-16.md#measurement).)
+By default (`BeatSync.Mode` `follow`) the plugin follows without announcing itself: other apps in the session do
+not see it, and it never changes the session's tempo or start/stop state.
+
+With `BeatSync.Mode` `peer` the console takes part as a full peer, as the apps in the session do (BS-03):
+
+- it announces itself and answers the other apps' clock measurements, so they see it as a member of the session;
+- an operator's change of the speed master's tempo goes to the session, and the other apps follow it;
+- `Plugin "gma3_beat_sync" "play"` and `"pause"` start the session (on its next bar) and stop it;
+- with no other app on the network it founds its own session, at the speed master's tempo.
+
+A plugin answers the measurements once a frame. Stamped as the reply is sent, that put 8 ms of error into every app
+that measured the console; the plugin stamps them for when the request most likely arrived, which brought the error
+to about 0.15 ms ([BS-03 probe](probes/bs-03-full-peer-probe-2026-10-16.md)).
 
 ## Install
 
@@ -38,6 +48,8 @@ Commands:
 | `Plugin "gma3_beat_sync"` | start following; the plugin runs until stopped |
 | `Plugin "gma3_beat_sync" "stop"` | stop at the next frame; the speed master keeps its last tempo |
 | `Plugin "gma3_beat_sync" "status"` | print the state, peers, tempo, beat, problems and the last action |
+| `Plugin "gma3_beat_sync" "play"` | peer mode only: start the session on its next bar (the bar of `Quantum` beats); every app in the session starts |
+| `Plugin "gma3_beat_sync" "pause"` | peer mode only: stop the session now; every app in the session stops |
 
 The plugin runs beside other plugins (it was tested beside gma3-mcp's bridge). It does not depend on gma3-mcp.
 
@@ -71,7 +83,8 @@ The plugin reads them when it starts and every half second. A missing variable t
 | `BeatSync.OnJoin`, `BeatSync.OnLeave` | (none) | A command when the plugin joins a session, or the session's last peer leaves. |
 | `BeatSync.TempoThreshold` | `0.01` | The tempo change, in BPM, that rewrites the speed master. |
 | `BeatSync.LeadMs` | `0` | Run beat actions this many milliseconds early. The console shows the effect of a command about one frame (17 ms) after it runs; see [Timing](#timing). |
-| `BeatSync.Interfaces` | `127.0.0.1 0.0.0.0` | Addresses to listen for the session on. `0.0.0.0` is the default network interface; `127.0.0.1` hears apps on the same computer. Add the address of another network interface to hear sessions there. Read when the plugin starts. |
+| `BeatSync.Interfaces` | `127.0.0.1 0.0.0.0` | Addresses to listen for the session on. `0.0.0.0` is the default network interface; `127.0.0.1` hears apps on the same computer. Add the address of another network interface to hear sessions there. In peer mode the plugin announces itself from each address other than `0.0.0.0`, so give the console's own network address (for example `127.0.0.1 192.168.1.20`). Read when the plugin starts. |
+| `BeatSync.Mode` | `follow` | `follow`: listen only. `peer`: a full peer (see above); needs an address other than `0.0.0.0` in `Interfaces`. Read when the plugin starts. |
 
 Commands are console command lines, as typed. Problems in the configuration (a speed master or sequence that does
 not exist, an action that is not `<N> <phase> <command>`, a bad quantum) are reported in `BeatSync.Problems`; the
@@ -104,6 +117,9 @@ so a reader should also check `BeatSync.Updated`: a time more than 2 s old means
 | `BeatSync.MissedBeats` | Beats not run because a frame was more than a frame late |
 | `BeatSync.Problems` | Configuration problems, separated by `; ` |
 | `BeatSync.Error` | The last error |
+| `BeatSync.ActiveMode` | `follow` or `peer`: the mode the plugin runs in (a peer that has no address to send from runs as `follow`, with a problem reported) |
+| `BeatSync.Node` | Peer mode: the console's node id (16 hex digits), new at every start |
+| `BeatSync.OwnSession` | Peer mode: `yes` when the session is the console's own (it founded it), `no` when it joined another app's |
 | `BeatSync.Version`, `BeatSync.Updated` | Plugin version, and the time of this status (UTC) |
 
 The shared Lua table `BeatSync.status` (global `BeatSync`) has the same and more for Lua readers: `joined`
@@ -127,6 +143,11 @@ session …", "show loaded: …"), `frame_periods_us` (the last 120 frame period
   count, since it does not announce itself) starts at once; the plugin hears of it a few tens of ms later and runs
   the start's first beat action late, as soon as it knows (up to 100 ms late; later than that, it starts with the
   next beat).
+- **Peer mode.** An operator's change of the speed master is sent when it has held for two reads in a row (about
+  0.1 s), and not within 0.5 s of the plugin's own write. The session's tempo is clamped to 20–999 BPM. When the
+  console joins a session that is already playing it is not playing itself until an app in the session starts or
+  stops again, as Link apps do (`link/Controller.hpp`, joinSession); with `StartStop` `off` the beat actions run
+  anyway.
 - **Missed frames.** When the console misses frames, a beat whose frame is more than one frame late is skipped and
   counted in `BeatSync.MissedBeats`, rather than run late.
 
@@ -148,7 +169,8 @@ session …", "show loaded: …"), `frame_periods_us` (the last 120 frame period
 ## Network and security
 
 The plugin listens on UDP port 20808 and joins the multicast group 224.76.78.75, and sends clock measurement
-requests to the apps it finds. The protocol has no authentication: any device on the console's network can announce
+requests to the apps it finds. In peer mode it also announces itself to that group and answers measurement requests
+on a UDP port of its own, and its tempo and start/stop changes reach every app in the session. The protocol has no authentication: any device on the console's network can announce
 a session and so drive the tempo and the configured commands. Run it only on a network you control. See
 [SECURITY.md](../SECURITY.md).
 

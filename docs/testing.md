@@ -40,6 +40,9 @@ layouts) on a simulated clock: measurement and the ghost-host offset, beats on t
 the quantum, stop and leave, the 5 s ttl, pongs that do not belong to the ping in flight, failing measurements,
 the choice between two sessions and between timelines of one session (as `link/Sessions.hpp` does), quantized and
 immediate starts, the lead, missed beats, a quantum change, a timeline change, and the drift between measurements.
+Peer mode (BS-03): founding its own session, its announcements and ByeBye, compensated pongs, joining a session that
+is ahead and staying in it when its peers leave, another peer joining its session, tempo and start/stop proposals,
+and joining a playing session without playing (STARTSTOPSTATE-2).
 
 ### The plugin (`test/lua/plugin_test.lua`)
 
@@ -49,7 +52,10 @@ frame with an instruction limit per resume and a check that no frame blocks for 
 with the speed master, `ReSync` and `OnBar` on the bars, numbered actions, `OnJoin` and `OnStart`; tempo changes
 (threshold, SpeedScale above 225 BPM written once); stopping; configuration problems and fixing them while running;
 ByeBye, rejoining and the ttl; StartStop on and off; failing commands; a show load; a second start and unknown
-arguments.
+arguments. Peer mode: alone, the master keeps its tempo (TEMPO-5); started into a session, the master takes its tempo
+(TEMPO-2); Responses to Alive messages, pings answered, an operator's tempo change sent without a write-back
+(TEMPO-1), `play` and `pause`, ByeBye on stop, a missing interface address, a bad `Mode`, and no status variable
+sharing a name with a configuration variable.
 
 ### The live chunk offline (`test/lua/follow_chunk_test.lua`)
 
@@ -98,7 +104,7 @@ Prerequisites:
 
 ```sh
 node test/live/follow_test_peer.mjs --scenario steady         # also: tempo-change, stopped
-node test/live/plugin_live.mjs timing --minutes 5             # also: beattime, startstop, leave
+node test/live/plugin_live.mjs timing --minutes 5             # also: beattime, startstop, leave, peer-tempo, peer-startstop
 ```
 
 `plugin_live.mjs` tests the plugin itself: it must be imported, and `--sequence` (default 950) must be a chase whose
@@ -112,6 +118,11 @@ measurement of the session) places each cue change the plugin causes on the sess
 | `beattime` | Link BEATTIME-1: without a session, starting and stopping the plugin changes neither the speed master nor the chase. BEATTIME-2: a second peer joining the followed session changes neither its tempo nor the timing of the beat actions |
 | `startstop` | Link STARTSTOPSTATE-1: no beat actions while stopped; after the peer plays, the first one is cue 1 on the start bar; none after it stops; `Playing` follows |
 | `leave` | a peer that quits is gone within 1.5 s (ByeBye); rejoining picks up the new tempo and rewrites the speed master; a peer that vanishes is dropped after its 5 s ttl |
+| `peer-tempo` | BS-03, `Mode` `peer`: TEMPO-5 (alone, the console founds a session at its master's 100 BPM; the master is unchanged); a test peer that joins takes the console's tempo; TEMPO-2 (started into a test peer's session at 130 BPM with its master at 90, the console joins and the master goes to 130); TEMPO-1 (the master moved to 140 reaches the test peer, the test peer's 125 reaches the master); TEMPO-4 (20 and 999 BPM reach the master) |
+| `peer-startstop` | BS-03, STARTSTOPSTATE-2: joining a playing test peer's session, the console is not playing while the test peer plays on; `pause` stops the test peer; `play` starts it on a bar of the session |
+
+The peer scenarios need a network with no other Link app (stop any relay such as LinkMaster): the console's
+session and tempo changes would reach it.
 
 `--external 1` runs `timing`, `beattime` (BEATTIME-2) and `startstop` against a session already on the network,
 such as Ableton Live's, instead of a test peer; for `startstop` an operator presses Play, then Stop, in the app

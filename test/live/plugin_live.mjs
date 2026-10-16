@@ -95,7 +95,10 @@ async function stopPlugin() {
 }
 async function masterState() {
   const [f, scale] = await lua(`local m = ShowData().Masters.Speed[${MASTER}] return m:GetFader({}), m:Get("SpeedScale", Enums.Roles.Display)`);
-  return { fader: f, scale, bpm: 225 * Math.pow(f / 100, Math.log2(3.75)) };
+  // the fader's base tempo times the SpeedScale (One, MulN, DivN), as the plugin reads it (master_bpm)
+  const n = /^Mul(\d+)$/.exec(scale), d = /^Div(\d+)$/.exec(scale);
+  const factor = n ? Number(n[1]) : d ? 1 / Number(d[1]) : 1;
+  return { fader: f, scale, bpm: 225 * Math.pow(f / 100, Math.log2(3.75)) * factor };
 }
 async function cueNow() {
   const [c] = await lua(`local s = DataPool().Sequences[${SEQ}] local c = s and s.CurrentCue return c and c.no or -1`);
@@ -370,6 +373,7 @@ try {
     check(Math.abs(lastTempo(A) - 100) < 0.01, "it takes the console's 100 (TEMPO-2 seen from the test peer)", lastTempo(A));
     // TEMPO-2: the console starts into an existing session at 130: it joins it and its master follows
     await stopPlugin();
+    check(Math.abs((await masterState()).bpm - 100) < 0.01, "TEMPO-5: stopping the plugin leaves the master's tempo");
     A.send("tempo 130");
     await sleep(1500);
     await setMaster(90);
