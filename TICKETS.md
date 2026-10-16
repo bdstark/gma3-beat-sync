@@ -118,7 +118,10 @@ Live on onPC 2.5.1 against the test peer
 ([record](docs/probes/bs-02-follower-plugin-2026-10-16.md)): beat actions 23 ms after the beat as observed (about a
 frame of console latency; `LeadMs` 17 brings it to 8 ms), no drift over 5 minutes; BEATTIME-1, BEATTIME-2 and
 STARTSTOPSTATE-1 pass; leaving, rejoining and the ttl are handled. A show load ends the plugin's loop and the plugin
-cannot restart itself; it reports `not running` and is started again by hand. Open: the cases against Ableton Live.
+cannot restart itself; it reports `not running` and is started again by hand. Against Ableton Live (its session
+relayed by LinkMaster): BEATTIME-2 and STARTSTOPSTATE-1 pass ([record](docs/probes/bs-02-live-ableton-2026-10-16.md)).
+Beat and bar actions follow the beat regardless of start/stop by default (`StartStop` `off`), for beats relayed from a
+DJ booth that never send a start.
 
 ## BS-03 — Full peer (only if BS-01 shows it is safe)
 

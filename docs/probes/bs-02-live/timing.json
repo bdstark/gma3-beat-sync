@@ -1,0 +1,86 @@
+{
+  "scenario": "timing",
+  "checks": [
+    {
+      "ok": true,
+      "what": "the plugin follows the peer",
+      "detail": "following"
+    },
+    {
+      "ok": true,
+      "what": "the speed master has the session tempo",
+      "detail": {
+        "master": 164.4995,
+        "session": 164.5
+      }
+    },
+    {
+      "ok": true,
+      "what": "a Go on every beat in every window (7 or 8 per 3.7 s)"
+    },
+    {
+      "ok": true,
+      "what": "no missed beats",
+      "detail": "0"
+    }
+  ],
+  "ok": true,
+  "sessionBpm": 164.5,
+  "windows": [
+    {
+      "atS": 4,
+      "changes": 10,
+      "meanMs": 22.59,
+      "sdMs": 10.32
+    },
+    {
+      "atS": 35,
+      "changes": 10,
+      "meanMs": 25.48,
+      "sdMs": 10.67
+    },
+    {
+      "atS": 64,
+      "changes": 11,
+      "meanMs": 25.89,
+      "sdMs": 9.38
+    },
+    {
+      "atS": 94,
+      "changes": 10,
+      "meanMs": 22.82,
+      "sdMs": 9.28
+    },
+    {
+      "atS": 124,
+      "changes": 10,
+      "meanMs": 18.82,
+      "sdMs": 11.76
+    }
+  ],
+  "lagMs": 23.12,
+  "driftMsPerMin": -2.04,
+  "status": {
+    "State": "following",
+    "DroppedFrames": "197",
+    "MissedBeats": "0",
+    "Playing": "no",
+    "Tempo": "164.500",
+    "Beat": "1643.79",
+    "Peers": "3",
+    "LastAction": "OnBeat: Go+ Sequence 950 at beat 1643 (+5.5 ms)",
+    "counters": {
+      "invalid_timelines": 0,
+      "evicted_sessions": 0,
+      "packets": 2924,
+      "failed": 0,
+      "retries": 0,
+      "measurements": 5,
+      "evicted_peers": 0,
+      "unpaired_pongs": 0,
+      "pongs": 255,
+      "rejected": 0
+    }
+  },
+  "masterRestored": true
+}

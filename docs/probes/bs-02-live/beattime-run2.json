@@ -1,0 +1,57 @@
+{
+  "scenario": "beattime",
+  "checks": [
+    {
+      "ok": true,
+      "what": "following the external session",
+      "detail": "following"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: the joining peer is seen",
+      "detail": {
+        "before": "3",
+        "after": "4"
+      }
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: the session keeps its tempo",
+      "detail": {
+        "before": "164.500",
+        "after": "164.500"
+      }
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: beat actions before and after the join"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: no jump in the beat actions' lag when the peer joins (< 6 ms)",
+      "detail": 5
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: the join does not change the session timeline"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: no beats missed across the join"
+    }
+  ],
+  "ok": true,
+  "beattime2": {
+    "tempo": "164.500",
+    "before": {
+      "changes": 9,
+      "meanMs": 25.8
+    },
+    "after": {
+      "changes": 8,
+      "meanMs": 30.79
+    },
+    "joiningPeerTempo": 164.499838
+  },
+  "masterRestored": true
+}

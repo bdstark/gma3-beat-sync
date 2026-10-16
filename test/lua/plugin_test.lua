@@ -273,10 +273,10 @@ do
 end
 
 ------------------------------------------------------------------------------------------------------------------
--- StartStop: beat actions wait for a quantized start and stop with the session; StartStop off runs them anyway
+-- StartStop on: beat actions wait for a quantized start and stop with the session; StartStop off runs them anyway
 
 do
-  local c = console({ OnBeat = "Go+ Macro 5", OnStart = "Go+ Macro 4", OnStop = "Go+ Macro 6" })
+  local c = console({ OnBeat = "Go+ Macro 5", OnStart = "Go+ Macro 4", OnStop = "Go+ Macro 6", StartStop = "on" })
   c.peer.playing = false
   c.run(2)
   check(#cmds_matching(c, "^Go%+ Macro 5$") == 0, "no beat actions while stopped")
@@ -478,6 +478,30 @@ do
     .. tostring(c.vars["BeatSync.State"]))
   check(#cmds_matching(c, "^Master") == 0, "and drives no speed master")
   check((c.env.BeatSync.status.counters.invalid_timelines or 0) > 0, "and is counted as invalid")
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- The default: beat and bar actions follow the beat whether or not the session ever starts (a DJ booth relayed into
+-- Link through ShowKontrol may never send a start); OnStart and OnStop still run if a start or stop arrives
+
+do
+  local c = console({ OnBeat = "Go+ Macro 5", OnBar = "Go+ Macro 7", OnStart = "Go+ Macro 4", OnStop = "Go+ Macro 6" })
+  c.peer.playing, c.peer.ss_beats, c.peer.ss_time = false, 0, 0 -- a session that never started: stst all zeros
+  c.run(3)
+  local beats, bars = #cmds_matching(c, "^Go%+ Macro 5$"), #cmds_matching(c, "^Go%+ Macro 7$")
+  check(beats >= 5 and bars >= 1, "by default, beat and bar actions run in a session that never started ("
+    .. beats .. " beats, " .. bars .. " bars)")
+  check(c.vars["BeatSync.Playing"] == "no", "the status still says the session is not playing")
+  check(#cmds_matching(c, "^Go%+ Macro 4$") == 0, "no OnStart without a start")
+  -- a start and a stop that do arrive still run OnStart and OnStop; the beat actions carry on through both
+  c.peer.playing, c.peer.ss_beats, c.peer.ss_time = true, 0, c.us + c.peer.offset
+  c.run(1)
+  c.peer.playing, c.peer.ss_beats, c.peer.ss_time = false, 0, c.us + c.peer.offset + 1
+  local before = #cmds_matching(c, "^Go%+ Macro 5$")
+  c.run(1.5)
+  check(#cmds_matching(c, "^Go%+ Macro 4$") == 1 and #cmds_matching(c, "^Go%+ Macro 6$") == 1, "OnStart and OnStop ran")
+  check(#cmds_matching(c, "^Go%+ Macro 5$") > before, "beat actions carry on after the stop")
+  check(c.vars["BeatSync.Problems"] == "", "the default is not a configuration problem")
 end
 
 print(string.format("plugin_test: %d checks, %d failures", checks, failures))

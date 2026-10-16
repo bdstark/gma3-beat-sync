@@ -1,0 +1,147 @@
+{
+  "scenario": "startstop",
+  "checks": [
+    {
+      "ok": true,
+      "what": "following the external session",
+      "detail": "following"
+    },
+    {
+      "ok": true,
+      "what": "the session is stopped at the start (press Play only when asked)",
+      "detail": "no"
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: the session's start was seen"
+    },
+    {
+      "ok": false,
+      "what": "STARTSTOPSTATE-1: the first beat action is cue 1 on a bar (the app's quantized start)",
+      "detail": {
+        "t": 1792148063475145,
+        "cue": 1000,
+        "beat": 437,
+        "offsetMs": 45.09,
+        "barPos": 1
+      }
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: the session's stop was seen"
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: no beat actions after the stop",
+      "detail": {
+        "at": "2026-10-16T10:54:41.881Z",
+        "changes": 0,
+        "playing": "no"
+      }
+    }
+  ],
+  "ok": false,
+  "windows": [
+    {
+      "at": "2026-10-16T10:54:07.717Z",
+      "changes": 0,
+      "playing": "no"
+    },
+    {
+      "at": "2026-10-16T10:54:11.075Z",
+      "changes": 0,
+      "playing": "no"
+    },
+    {
+      "at": "2026-10-16T10:54:14.473Z",
+      "changes": 0,
+      "playing": "no"
+    },
+    {
+      "at": "2026-10-16T10:54:17.767Z",
+      "changes": 0,
+      "playing": "no"
+    },
+    {
+      "at": "2026-10-16T10:54:21.550Z",
+      "changes": 0,
+      "playing": "no"
+    },
+    {
+      "at": "2026-10-16T10:54:24.936Z",
+      "changes": 3,
+      "playing": "yes",
+      "first": {
+        "t": 1792148063475145,
+        "cue": 1000,
+        "beat": 437,
+        "offsetMs": 45.09,
+        "barPos": 1
+      }
+    },
+    {
+      "at": "2026-10-16T10:54:28.183Z",
+      "changes": 6,
+      "playing": "yes",
+      "first": {
+        "t": 1792148065471958,
+        "cue": 1000,
+        "beat": 441,
+        "offsetMs": 41.903,
+        "barPos": 1
+      }
+    },
+    {
+      "at": "2026-10-16T10:54:31.402Z",
+      "changes": 6,
+      "playing": "yes",
+      "first": {
+        "t": 1792148068465006,
+        "cue": 3000,
+        "beat": 447,
+        "offsetMs": 35.051,
+        "barPos": 3
+      }
+    },
+    {
+      "at": "2026-10-16T10:54:34.659Z",
+      "changes": 6,
+      "playing": "yes",
+      "first": {
+        "t": 1792148071968296,
+        "cue": 2000,
+        "beat": 454,
+        "offsetMs": 38.341,
+        "barPos": 2
+      }
+    },
+    {
+      "at": "2026-10-16T10:54:37.951Z",
+      "changes": 1,
+      "playing": "no",
+      "first": {
+        "t": 1792148074959844,
+        "cue": 4000,
+        "beat": 460,
+        "offsetMs": 29.889,
+        "barPos": 0
+      }
+    },
+    {
+      "at": "2026-10-16T10:54:41.881Z",
+      "changes": 0,
+      "playing": "no"
+    }
+  ],
+  "startstop": {
+    "firstChange": {
+      "t": 1792148063475145,
+      "cue": 1000,
+      "beat": 437,
+      "offsetMs": 45.09,
+      "barPos": 1
+    },
+    "windowsWhilePlaying": 4
+  },
+  "masterRestored": true
+}
