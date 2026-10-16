@@ -401,6 +401,7 @@ local function run()
     status.peers, status.sessions, status.session = s.peers, s.sessions, s.session
     status.tempo, status.beat, status.phase, status.playing = s.bpm, s.beat, s.phase, s.playing
     status.drift_ms_per_min = s.drift_us_per_min and s.drift_us_per_min / 1000 or nil
+    status.ghost_intercept_us = s.ghost_intercept_us
     status.counters = s.counters
     local med, p90 = median_and_p90(frame_periods)
     status.frame_ms = med and med / 1000

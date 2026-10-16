@@ -122,7 +122,9 @@ measurement of the session) places each cue change the plugin causes on the sess
 | `peer-startstop` | BS-03, STARTSTOPSTATE-2: joining a playing test peer's session, the console is not playing while the test peer plays on; `pause` stops the test peer; `play` starts it on a bar of the session |
 
 The peer scenarios need a network with no other Link app (stop any relay such as LinkMaster): the console's
-session and tempo changes would reach it.
+session and tempo changes would reach it. They need no chase: run them with `--sequence 0`. `peer-tempo` also
+measures the clock error of a test peer that measured the console through the plugin's replies (it must be within
+1 ms).
 
 `--external 1` runs `timing`, `beattime` (BEATTIME-2) and `startstop` against a session already on the network,
 such as Ableton Live's, instead of a test peer; for `startstop` an operator presses Play, then Stop, in the app

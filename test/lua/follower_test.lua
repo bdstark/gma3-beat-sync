@@ -614,6 +614,7 @@ do
   check(pong and pong.type == P.PONG and pong.session_id == NODE, "pong of the current session")
   check(pong.ghost == P.host_to_ghost(f.sessions[NODE].xform, 2008000), "ghost stamped at the midpoint: " .. tostring(pong.ghost))
   check(pong.host == 777 and pong.prev_ghost == 555, "the ping's payload is echoed")
+  check(f:status(2016000).ghost_intercept_us == f.sessions[NODE].xform.intercept, "status reports the session's clock")
   check(f:answer_ping(ping .. "x", 0, 1) == nil, "a ping too large for Link is not answered (link/PingResponder.hpp)")
   check(f:answer_ping(P.encode_ping(1), 3000000, 2000000) ~= nil, "a bound after now is clamped")
 end

@@ -124,7 +124,8 @@ so a reader should also check `BeatSync.Updated`: a time more than 2 s old means
 
 The shared Lua table `BeatSync.status` (global `BeatSync`) has the same and more for Lua readers: `joined`
 (interfaces and any that failed), `counters` (packets, rejected packets, pongs, measurements, failed measurements,
-missed beats, timeline changes), `warnings` and `errors` (the last ten each, such as "joined session …", "left
+missed beats, timeline changes; in peer mode also pings answered and tempo and start/stop proposals),
+`ghost_intercept_us` (the followed session's clock: ghost time = host time + this, in µs), `warnings` and `errors` (the last ten each, such as "joined session …", "left
 session …", "show loaded: …"), `frame_periods_us` (the last 120 frame periods) and `show`.
 
 ## Timing
@@ -185,3 +186,8 @@ follower are BEATTIME-1, BEATTIME-2 and STARTSTOPSTATE-1 (the last with `BeatSyn
   BEATTIME-1 needs no session at all.
   - Live ran on another computer, and its session reached the console's computer through a relay app (LinkMaster),
     so the plugin measured the relay's peers rather than Live itself.
+
+With `BeatSync.Mode` `peer`, the applicable cases are TEMPO-1 to TEMPO-5 and STARTSTOPSTATE-2. Against the test
+peer on onPC 2.5.1, TEMPO-1, TEMPO-2, TEMPO-4, TEMPO-5 and STARTSTOPSTATE-2 pass
+([BS-03 record](probes/bs-03-peer-live-2026-10-16.md)). TEMPO-3 was not run as written: a show load ends the
+plugin's loop, and the restart is TEMPO-2's case. Peer mode has not been tested against Ableton Live.

@@ -587,6 +587,7 @@ function Follower:status(now_us)
     phase = pos and pos.phase / 1e6 or nil,
     playing = pos and pos.playing, -- false when stopped, nil without a session (not "pos and x or nil")
     drift_us_per_min = pos and self.sessions[self.current].drift_us_per_min or nil,
+    ghost_intercept_us = pos and self.sessions[self.current].xform.intercept or nil, -- ghost = host + this (slope 1)
     counters = self.counters,
   }
 end

@@ -91,7 +91,7 @@ end
 
 local r0 = run(0)
 check(not r0.error, "a prompt responder: " .. tostring(r0.error))
-check(r0.intercept and math.abs(r0.intercept - 7000000) <= 200, "intercept near the offset: " .. tostring(r0.intercept))
+check(r0.intercept and math.abs(tonumber(r0.intercept) - 7000000) <= 200, "intercept near the offset: " .. tostring(r0.intercept))
 local r1 = run(3)
 check(not r1.error, "every third pong late: still measured: " .. tostring(r1.error))
 check(r1.start_stop == "1,4000000,2", "the newest start/stop state is reported: " .. tostring(r1.start_stop))
