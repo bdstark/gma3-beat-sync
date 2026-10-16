@@ -131,7 +131,7 @@ BS-01's "follower only": replies stamped for when each ping most likely arrived 
 peer from 8 ms to about 0.15 ms. Live on onPC 2.5.1 against the test peer
 ([record](docs/probes/bs-03-peer-live-2026-10-16.md)): TEMPO-1, TEMPO-2, TEMPO-4, TEMPO-5 and STARTSTOPSTATE-2
 pass, and `play` and `pause` start and stop the test peer. A peer measuring the console's clock through the plugin
-is within 0.06 ms. TEMPO-3 is covered by TEMPO-2's restart into an existing session, because a show load ends the
+is within 0.06 ms. Rerun on main after review round 1: the same results. TEMPO-3 is covered by TEMPO-2's restart into an existing session, because a show load ends the
 plugin's loop. Not run against Ableton Live: its session reaches this computer only through a relay.
 
 **Request:** Appear as a Link peer, send start/stop and propose tempo changes from the console.
