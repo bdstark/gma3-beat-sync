@@ -38,7 +38,31 @@ GPL-2.0-or-later. See [LICENSE](LICENSE).
   source code, which is published under the GPL version 2 or later (Copyright 2016, Ableton AG). This repository
   is licensed the same way.
 - **The Link library:** used only to build a test peer for this repository's tests. It is included as a git
-  submodule under its own license (GPL version 2 or later), with its own third-party dependencies.
+  submodule under its own license (GPL version 2 or later), with its own third-party dependencies. Nothing from it
+  is shipped in the plugin.
+
+### Third-party code in `modules/`
+
+| Path | What | Version | License |
+| --- | --- | --- | --- |
+| `modules/link` | [Link](https://github.com/Ableton/link), Copyright 2016, Ableton AG | tag `Link-4.1` | GPL-2.0-or-later ([LICENSE.md](https://github.com/Ableton/link/blob/Link-4.1/LICENSE.md)) |
+| `modules/link/modules/asio-standalone` | [Asio](https://github.com/chriskohlhoff/asio), Link's network library (its own submodule) | `asio-1-38-2`, pinned by Link | Boost Software License 1.0 (`LICENSE_1_0.txt`) |
+| `modules/link/third_party/catch` | Catch, the test framework Link's own unit tests use; not built here | bundled with Link | Boost Software License 1.0 (header of `catch.hpp`) |
+
+## Development
+
+Clone with the submodules, then run the checks (stock Lua 5.5 as `lua` and `luac`, CMake 3.16 or later and a C++
+compiler are needed):
+
+```sh
+git clone --recurse-submodules https://github.com/bdstark/gma3-beat-sync.git
+cd gma3-beat-sync
+scripts/check.sh
+```
+
+`scripts/check.sh` checks the SPDX headers, parses every Lua file with Lua 5.5, runs the Lua harness and builds the
+test peer from `modules/link`. CI runs the same steps. See [CONTRIBUTING.md](CONTRIBUTING.md),
+[SECURITY.md](SECURITY.md), [ACCESSIBILITY.md](ACCESSIBILITY.md) and the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Trademarks and affiliation
 
