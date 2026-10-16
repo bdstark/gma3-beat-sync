@@ -1,0 +1,33 @@
+{
+  "scenario": "leave",
+  "checks": [
+    {
+      "ok": true,
+      "what": "following the peer"
+    },
+    {
+      "ok": true,
+      "what": "a peer that quits is gone at once (ByeBye)",
+      "detail": 426
+    },
+    {
+      "ok": true,
+      "what": "rejoined, with the new session's tempo",
+      "detail": "140.000"
+    },
+    {
+      "ok": true,
+      "what": "the speed master is rewritten after rejoining",
+      "detail": 139.9999
+    },
+    {
+      "ok": true,
+      "what": "a vanished peer is dropped after its 5 s ttl",
+      "detail": 5069
+    }
+  ],
+  "ok": true,
+  "byebyeMs": 426,
+  "ttlMs": 5069,
+  "masterRestored": true
+}

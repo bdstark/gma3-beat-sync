@@ -5,26 +5,26 @@ Ableton's synchronization technology. The plugin sets a speed master to the sess
 with its bars, and fires show actions on the beat. It runs entirely inside the console: no computer, helper program,
 OSC or MIDI setup is needed.
 
-**Status:** in development; there is no plugin to install yet. The design and the work are in
-[TICKETS.md](TICKETS.md). The protocol module (`plugin/beat_sync_protocol.lua`) parses the session's messages and
-does the timeline arithmetic, checked against the Link library's own code, and has followed a test peer inside
-onPC ([docs/probes](docs/probes)). It has not been tested against Ableton Live, and no compatibility is claimed
-until the applicable cases of Link's [test plan](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) pass.
+**Status:** in development. The plugin follows a session and drives a speed master, `ReSync` and commands on
+beats, bars, start and stop; see [docs/plugin.md](docs/plugin.md). It has been tested on grandMA3 onPC 2.5.1 against
+a test peer built from the Link library, where the follower cases of Link's
+[test plan](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) pass. It has not been tested against Ableton
+Live, and no compatibility is claimed until it has. The work is in [TICKETS.md](TICKETS.md).
 
-## How it will work
+## How it works
 
-The console has no Link input, but its Lua plugins can use UDP sockets. The plugin will:
+The console has no Link input, but its Lua plugins can use UDP sockets. The plugin:
 
-1. listen for the announcements of the Link apps on the network (tempo, timeline, start/stop);
-2. measure its clock against one of them;
+1. listens for the announcements of the Link apps on the network (tempo, timeline, start/stop);
+2. measures its clock against one of them;
 3. on every console frame:
-   - compute the current beat and bar;
-   - set the speed master's BPM;
-   - realign effects on the bar;
-   - run the actions configured for the beat.
+   - computes the current beat and bar;
+   - sets the speed master's BPM when the tempo changes;
+   - realigns sequences on the bar;
+   - runs the commands configured for the beat.
 
-The console runs plugins once a frame, about every 16.6 ms on onPC 2.5.1, so an action lands within about ±8 ms of
-its beat.
+The console runs plugins once a frame, about every 16.6 ms on onPC 2.5.1, so an action runs within about ±8 ms of
+its beat, and the console shows its effect about a frame later (`BeatSync.LeadMs` makes up for that).
 
 ## Related projects
 

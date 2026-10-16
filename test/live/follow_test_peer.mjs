@@ -49,7 +49,7 @@ const peerBin = join(root, process.env.BUILD_DIR ?? "build", "tools", "bin", "gb
 const protocol = readFileSync(join(root, "plugin", "beat_sync_protocol.lua"), "utf8");
 const chunk = readFileSync(join(root, "test", "live", "follow_chunk.lua"), "utf8");
 // The module returns its table; the chunk receives it as P.
-const code = `local P = (function()\n${protocol}\nend)()\nlocal QUANTUM = ${opts.quantum * 1e6}\n${chunk}`;
+const code = `local P = (function(...)\n${protocol}\nend)()\nlocal QUANTUM = ${opts.quantum * 1e6}\n${chunk}`;
 
 function bridgeLua(source) {
   return new Promise((resolve, reject) => {

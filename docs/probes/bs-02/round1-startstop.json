@@ -1,0 +1,76 @@
+{
+  "scenario": "startstop",
+  "checks": [
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: no beat actions while the session is stopped",
+      "detail": 0
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: beat actions after the peer plays",
+      "detail": 8
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: the first beat action is on the start bar (cue 1 on a bar)",
+      "detail": {
+        "t": 1792134360657974,
+        "cue": 1000,
+        "beat": 12,
+        "offsetMs": 68.58,
+        "barPos": 0
+      }
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: status Playing yes",
+      "detail": "yes"
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: no beat actions after the peer stops",
+      "detail": 0
+    },
+    {
+      "ok": true,
+      "what": "STARTSTOPSTATE-1: status Playing no",
+      "detail": {
+        "State": "following",
+        "DroppedFrames": "14",
+        "MissedBeats": "0",
+        "Playing": "no",
+        "Tempo": "120.000",
+        "Beat": "26.13",
+        "Peers": "1",
+        "LastAction": "OnBeat: Go+ Sequence 950 at beat 20 (+1.3 ms)",
+        "counters": {
+          "invalid_timelines": 0,
+          "evicted_sessions": 0,
+          "packets": 100,
+          "failed": 0,
+          "timeline_changes": 1,
+          "retries": 0,
+          "measurements": 1,
+          "evicted_peers": 0,
+          "unpaired_pongs": 0,
+          "pongs": 51,
+          "rejected": 0
+        }
+      }
+    }
+  ],
+  "ok": true,
+  "startstop": {
+    "firstChange": {
+      "t": 1792134360657974,
+      "cue": 1000,
+      "beat": 12,
+      "offsetMs": 68.58,
+      "barPos": 0
+    },
+    "changesAfterPlay": 8,
+    "changesAfterStop": 0
+  },
+  "masterRestored": true
+}

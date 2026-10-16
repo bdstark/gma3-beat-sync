@@ -328,4 +328,11 @@ function M.unhex(h)
   return (h:gsub("..", function(x) return string.char(tonumber(x, 16)) end))
 end
 
+-- In the console this file is one of the plugin's components (plugin/gma3_beat_sync.xml). The console runs each
+-- component with (plugin name, component name, signal table, handle); the signal table is shared by all of the
+-- plugin's components, so the module registers itself there. Loaded with dofile() or load(source)(), there are no
+-- arguments and it only returns the table.
+local signal_table = select(3, ...)
+if type(signal_table) == "table" then signal_table.beat_sync_protocol = M end
+
 return M

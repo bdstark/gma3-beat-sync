@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Copyright (C) 2026 gma3-beat-sync contributors -->
+<GMA3 DataVersion="0.8.84.0">
+    <UserPlugin Name="gma3_beat_sync" Author="gma3-beat-sync" Version="0.1.0">
+        <ComponentLua Name="gma3_beat_sync" FileName="gma3_beat_sync.lua" />
+        <ComponentLua Name="beat_sync_protocol" FileName="beat_sync_protocol.lua" />
+        <ComponentLua Name="beat_sync_follower" FileName="beat_sync_follower.lua" />
+    </UserPlugin>
+</GMA3>
