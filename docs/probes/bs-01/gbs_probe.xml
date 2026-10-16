@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- Copyright (C) 2026 gma3-beat-sync contributors. BS-01 probe plugin; not part of the product. -->
+<GMA3 DataVersion="0.8.84.0">
+    <UserPlugin Name="gbs_probe" Author="gma3-beat-sync" Version="0.0.1">
+        <ComponentLua Name="gbs_probe" FileName="gbs_probe.lua" />
+    </UserPlugin>
+</GMA3>
