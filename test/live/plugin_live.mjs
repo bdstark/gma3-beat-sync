@@ -34,6 +34,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lua, checkLock } from "./bridge.mjs";
+import { judgeStartStop, checkExternalTempo } from "./plugin_live_checks.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
@@ -156,9 +157,17 @@ try {
     const st = await status();
     check(st.State === "following", "the plugin follows the peer", st.State);
     const m = await masterState();
-    const sessionBpm = opts.external ? parseFloat(st.Tempo) : 128;
-    results.sessionBpm = sessionBpm;
-    check(Math.abs(m.bpm - sessionBpm) < 0.01, "the speed master has the session tempo", { master: +m.bpm.toFixed(4), session: sessionBpm });
+    if (opts.external) {
+      // the session's tempo from the observer's own decoding of the announcements, not from the plugin under test
+      const w0 = await observe(10);
+      const t = checkExternalTempo({ observerMpb: w0.mpb, masterBpm: m.bpm, reportedTempo: st.Tempo });
+      results.sessionBpm = t.expected;
+      check(t.masterOk, "the speed master has the session tempo (decoded independently)", { master: +m.bpm.toFixed(4), session: t.expected });
+      check(t.reportOk, "the plugin reports the session tempo (decoded independently)", { reported: st.Tempo, session: t.expected });
+    } else {
+      results.sessionBpm = 128;
+      check(Math.abs(m.bpm - 128) < 0.01, "the speed master has the session tempo", { master: +m.bpm.toFixed(4), session: 128 });
+    }
     const windows = [];
     const start = Date.now();
     for (let k = 0; ; k++) {
@@ -264,40 +273,33 @@ try {
     console.error("READY: press Play in the app now");
     const deadline = Date.now() + opts["wait-s"] * 1000;
     const windows = [];
-    let phase = "waiting for play", firstChange = null, playingSeenAt = null, stoppedSeenAt = null, startState = null;
+    let phase = "waiting for play"; // only paces the operator's prompts; the judgement is judgeStartStop's
     while (Date.now() < deadline && phase !== "done") {
       const w = await observe(180);
       const st = await status();
-      windows.push({ at: new Date().toISOString(), changes: w.changes.length, playing: st.Playing, first: w.changes[0] });
-      console.error(JSON.stringify(windows.at(-1)));
-      if (phase === "waiting for play") {
-        if (w.changes.length > 0 || st.Playing === "yes") {
-          firstChange = w.changes[0] || null;
-          startState = w.startStop;
-          playingSeenAt = windows.length;
-          phase = "playing";
-          console.error("PLAYING: press Stop in the app after a few bars");
-        }
-      } else if (phase === "playing") {
-        if (st.Playing === "no") { stoppedSeenAt = windows.length; phase = "after stop"; }
+      windows.push({ at: new Date().toISOString(), changes: w.changes, playing: st.Playing, startStop: w.startStop });
+      console.error(JSON.stringify({ at: windows.at(-1).at, changes: w.changes.length, playing: st.Playing, first: w.changes[0] }));
+      if (phase === "waiting for play" && (w.changes.length > 0 || st.Playing === "yes")) {
+        phase = "playing";
+        console.error("PLAYING: press Stop in the app after a few bars");
+      } else if (phase === "playing" && st.Playing === "no") {
+        phase = "after stop";
       } else if (phase === "after stop") {
         phase = "done";
       }
     }
-    results.windows = windows;
-    check(playingSeenAt, "STARTSTOPSTATE-1: the session's start was seen");
+    results.windows = windows.map((w) => ({ at: w.at, changes: w.changes.length, playing: w.playing, first: w.changes[0], startStop: w.startStop }));
     // The session plays from its start beat (link/StartStopState.hpp beats); the first beat action is the first whole
     // beat at or after it. That is a bar when the app started quantized; a relay may stamp another beat.
-    const startBeat = startState && startState.playing ? startState.beats : null;
-    const expected = startBeat === null ? null : Math.ceil(startBeat - 1e-6);
-    results.startBeat = startBeat;
-    check(firstChange && firstChange.cue === 1000 && firstChange.beat === expected,
-      "STARTSTOPSTATE-1: the first beat action is cue 1 on the first whole beat of the session's start", { firstChange, startBeat, expected });
-    results.startOnBar = startBeat !== null && Math.abs(startBeat / 4 - Math.round(startBeat / 4)) < 1e-6;
-    check(stoppedSeenAt, "STARTSTOPSTATE-1: the session's stop was seen");
-    const afterStop = stoppedSeenAt ? windows[stoppedSeenAt] : null; // the window after the one that saw the stop
-    check(afterStop && afterStop.changes === 0, "STARTSTOPSTATE-1: no beat actions after the stop", afterStop);
-    results.startstop = { firstChange, windowsWhilePlaying: stoppedSeenAt ? stoppedSeenAt - playingSeenAt : null };
+    const j = judgeStartStop(windows);
+    check(j.started, "STARTSTOPSTATE-1: the session's start was seen");
+    check(j.firstOk, "STARTSTOPSTATE-1: the first beat action is cue 1 on the first whole beat of the session's start",
+      { firstChange: j.firstChange, startBeat: j.startState && j.startState.beats, expected: j.expectedFirstBeat });
+    check(j.stopped, "STARTSTOPSTATE-1: the session's stop was seen");
+    check(j.noneAfterStop, "STARTSTOPSTATE-1: no beat actions after the stop", j.afterStop && { changes: j.afterStop.changes.length });
+    results.startBeat = j.startState ? j.startState.beats : null;
+    results.startOnBar = results.startBeat !== null && Math.abs(results.startBeat / 4 - Math.round(results.startBeat / 4)) < 1e-6;
+    results.startstop = { firstChange: j.firstChange };
   }
 
   if (scenario === "startstop" && !opts.external) {
