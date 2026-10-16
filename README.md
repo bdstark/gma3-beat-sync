@@ -5,10 +5,11 @@ Ableton's synchronization technology. The plugin sets a speed master to the sess
 with its bars, and fires show actions on the beat. It runs entirely inside the console: no computer, helper program,
 OSC or MIDI setup is needed.
 
-**Status:** planning. Nothing is implemented yet. The design and the work are in [TICKETS.md](TICKETS.md). The
-console's Lua environment has been probed ([docs/probes](docs/probes)). It has not yet been tested against a real
-Link session, and no compatibility is claimed until the applicable cases of Link's
-[test plan](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) pass.
+**Status:** in development; there is no plugin to install yet. The design and the work are in
+[TICKETS.md](TICKETS.md). The protocol module (`plugin/beat_sync_protocol.lua`) parses the session's messages and
+does the timeline arithmetic, checked against the Link library's own code, and has followed a test peer inside
+onPC ([docs/probes](docs/probes)). It has not been tested against Ableton Live, and no compatibility is claimed
+until the applicable cases of Link's [test plan](https://github.com/Ableton/link/blob/master/TEST-PLAN.md) pass.
 
 ## How it will work
 
@@ -60,9 +61,12 @@ cd gma3-beat-sync
 scripts/check.sh
 ```
 
-`scripts/check.sh` checks the SPDX headers, parses every Lua file with Lua 5.5, runs the Lua harness and builds the
-test peer from `modules/link`. CI runs the same steps. See [CONTRIBUTING.md](CONTRIBUTING.md),
-[SECURITY.md](SECURITY.md), [ACCESSIBILITY.md](ACCESSIBILITY.md) and the [code of conduct](CODE_OF_CONDUCT.md).
+`scripts/check.sh` checks the SPDX headers, parses every Lua file with Lua 5.5, runs the Lua harness, builds the
+test tools from `modules/link` and checks the fixtures against Link's own parser and arithmetic. CI runs the same
+steps. [docs/testing.md](docs/testing.md) describes the harness, the test peer and the live tests on onPC.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [ACCESSIBILITY.md](ACCESSIBILITY.md) and the
+[code of conduct](CODE_OF_CONDUCT.md).
 
 ## Trademarks and affiliation
 
