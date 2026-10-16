@@ -33,6 +33,24 @@ It tests `plugin/beat_sync_protocol.lua` against Link's own code:
 5. **Robustness:** every truncation of every fixture packet, and 20 random byte changes of each, decode without
    raising.
 
+### The follower (`test/lua/follower_test.lua`)
+
+It drives `plugin/beat_sync_follower.lua` with simulated peers (Alive, ByeBye and pong packets in the Link
+layouts) on a simulated clock: measurement and the ghost-host offset, beats on the frame nearest them and bars on
+the quantum, stop and leave, the 5 s ttl, pongs that do not belong to the ping in flight, failing measurements,
+the choice between two sessions and between timelines of one session (as `link/Sessions.hpp` does), quantized and
+immediate starts, the lead, missed beats, a quantum change, a timeline change, and the drift between measurements.
+
+### The plugin (`test/lua/plugin_test.lua`)
+
+It loads the plugin's three components as the console does (the shared signal table) with the console API mocked
+(global variables, speed masters, sequences, `Cmd`, `Printf`) and mocked sockets, and runs `Main` one resume per
+frame with an instruction limit per resume and a check that no frame blocks for more than 8 ms. Scenarios: following
+with the speed master, `ReSync` and `OnBar` on the bars, numbered actions, `OnJoin` and `OnStart`; tempo changes
+(threshold, SpeedScale above 225 BPM written once); stopping; configuration problems and fixing them while running;
+ByeBye, rejoining and the ttl; StartStop on and off; failing commands; a show load; a second start and unknown
+arguments.
+
 ### The live chunk offline (`test/lua/follow_chunk_test.lua`)
 
 It runs `test/live/follow_chunk.lua` with mocked sockets and a simulated clock, one resume per frame, and checks
@@ -80,9 +98,22 @@ Prerequisites:
 
 ```sh
 node test/live/follow_test_peer.mjs --scenario steady         # also: tempo-change, stopped
+node test/live/plugin_live.mjs timing --minutes 5             # also: beattime, startstop, leave
 ```
 
-It starts a test peer, runs `test/live/follow_chunk.lua` (with the protocol module) inside the console for about
+`plugin_live.mjs` tests the plugin itself: it must be imported, and `--sequence` (default 950) must be a chase whose
+cues all have trigger Go. The test sets `BeatSync.*` variables and `--master` (default 12), and restores the
+master and deletes the variables afterwards. An independent observer (`test/live/observe_chunk.lua`, with its own
+measurement of the session) places each cue change the plugin causes on the session's beat grid:
+
+| Scenario | What it checks |
+| --- | --- |
+| `timing` | `OnBeat` `Go+ Sequence …` on every beat for `--minutes`: the lag of the cue changes behind the beats, their drift (less than 1.5 ms a minute), the speed master at the session tempo, no missed beats |
+| `beattime` | Link BEATTIME-1: without a session, starting and stopping the plugin changes neither the speed master nor the chase. BEATTIME-2: a second peer joining the followed session changes neither its tempo nor the timing of the beat actions |
+| `startstop` | Link STARTSTOPSTATE-1: no beat actions while stopped; after the peer plays, the first one is cue 1 on the start bar; none after it stops; `Playing` follows |
+| `leave` | a peer that quits is gone within 1.5 s (ByeBye); rejoining picks up the new tempo and rewrites the speed master; a peer that vanishes is dropped after its 5 s ttl |
+
+`follow_test_peer.mjs` starts a test peer, runs `test/live/follow_chunk.lua` (with the protocol module) inside the console for about
 two seconds, and compares the console's phase at each frame with the test peer's phase at the same wall-clock
 instant. It passes when every judged sample is within the tolerance (default 1 ms, `--tolerance-ms`), the tempo
 and the start/stop state match, and at least 60 samples were judged. Results are in the

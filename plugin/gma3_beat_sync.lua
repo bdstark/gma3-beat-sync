@@ -1,0 +1,400 @@
+-- SPDX-License-Identifier: GPL-2.0-or-later
+-- Copyright (C) 2026 gma3-beat-sync contributors
+--
+-- gma3_beat_sync: a grandMA3 plugin that follows a tempo session on the network (meant to be compatible with
+-- Link™) and drives the show from it: a speed master at the session's tempo, ReSync of chosen sequences on the bar,
+-- and commands on beats, bars, start, stop, joining and leaving.
+--
+-- It follows without announcing itself (BS-01: a plugin cannot answer other peers' measurements promptly enough to
+-- be a full peer). All work is bounded per console frame: at most 32 packets per socket, measurement exchanges
+-- within 4 ms (each receive bounded to 3 ms), and status written four times a second.
+--
+-- Commands:
+--   Plugin "gma3_beat_sync"            start following (runs until stopped)
+--   Plugin "gma3_beat_sync" "stop"     stop at the next frame
+--   Plugin "gma3_beat_sync" "status"   print the status to the command line history
+--
+-- Configuration and status are console global variables named BeatSync.<Key>; see docs/plugin.md. Configuration
+-- is read when the plugin starts and every half second while it runs, so it can be changed with
+--   SetGlobalVariable "BeatSync.Master" "3"
+-- The full status is also in the shared Lua table BeatSync (_G.BeatSync.status).
+--
+-- Components (plugin/gma3_beat_sync.xml): beat_sync_protocol.lua and beat_sync_follower.lua register themselves in
+-- the plugin's signal table; this one returns Main and Cleanup.
+
+local pluginName, componentName, signalTable = select(1, ...)
+
+local VERSION = "0.1.0"
+local PREFIX = "BeatSync."
+
+local MAX_PACKETS = 32            -- per socket per frame; the rest wait for the next frame
+local MEASURE_BUDGET_US = 4000    -- measurement time per frame; a 3 ms receive may start before it ends
+local MAX_EXCHANGES_PER_FRAME = 10
+local CONFIG_EVERY = 30           -- frames between configuration reads (about 0.5 s)
+local STATUS_EVERY = 15           -- frames between status writes (about 4 Hz)
+local FRAME_WINDOW = 120          -- frames kept for the frame statistics
+local MAX_ERRORS = 50             -- consecutive failing frames before the plugin stops
+
+-- The shared table other plugins and Lua can read. It survives ReloadAllPlugins (_G is console-global).
+_G.BeatSync = _G.BeatSync or {}
+local shared = _G.BeatSync
+shared.version = VERSION
+
+------------------------------------------------------------------------------------------------------------------
+-- Configuration
+
+local DEFAULTS = {
+  Master = "",              -- speed master 1..16 to set to the session tempo; empty: none
+  Quantum = "4",            -- beats per bar
+  StartStop = "on",         -- on: beat and bar actions run only while the session plays; off: always
+  Resync = "",              -- sequences to ReSync on each bar, e.g. "1, 5, 12"
+  OnBar = "",               -- a command on each bar
+  OnBeat = "",              -- a command on each beat
+  OnStart = "", OnStop = "", OnJoin = "", OnLeave = "",
+  TempoThreshold = "0.01",  -- BPM change that rewrites the speed master
+  LeadMs = "0",             -- run beat actions this much early (the console applies a command a frame later)
+  Interfaces = "127.0.0.1 0.0.0.0", -- addresses to join the session's multicast group on; 0.0.0.0 = default interface
+}
+local ACTIONS = 16 -- BeatSync.Action1 .. BeatSync.Action16: "<every N beats> <phase> <command>"
+
+local function getvar(name)
+  local v = (GetVar(GlobalVars(), PREFIX .. name)) -- GetVar of a missing variable returns no value (BS-01)
+  if v == nil then return nil end
+  return tostring(v)
+end
+
+local function setvar(name, value)
+  SetVar(GlobalVars(), PREFIX .. name, value == nil and "" or value)
+end
+
+local function trim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
+
+-- Reads and checks the configuration. Returns the configuration and a list of problems in words.
+local function read_config()
+  local c, problems = { raw = {} }, {}
+  for k, d in pairs(DEFAULTS) do
+    local v = getvar(k)
+    c.raw[k] = v
+    c[k] = trim(v ~= nil and v or d)
+  end
+
+  c.quantum = tonumber(c.Quantum)
+  if not c.quantum or c.quantum <= 0 or c.quantum > 64 then
+    problems[#problems + 1] = "Quantum must be a number of beats from 1 to 64, not '" .. c.Quantum .. "'"
+    c.quantum = 4
+  end
+  c.start_stop = c.StartStop:lower() ~= "off"
+  c.threshold = tonumber(c.TempoThreshold) or 0.01
+  c.lead_us = math.floor((tonumber(c.LeadMs) or 0) * 1000 + 0.5)
+
+  if c.Master ~= "" then
+    local n = math.tointeger(tonumber(c.Master))
+    local m = n and n >= 1 and n <= 16 and ShowData().Masters.Speed[n]
+    if m then c.master, c.master_handle = n, m
+    else problems[#problems + 1] = "Speed master '" .. c.Master .. "' does not exist (Master must be 1 to 16)" end
+  end
+
+  c.resync = {}
+  for item in c.Resync:gmatch("[^,%s]+") do
+    local n = math.tointeger(tonumber(item))
+    if n and DataPool().Sequences[n] then c.resync[#c.resync + 1] = n
+    else problems[#problems + 1] = "Sequence '" .. item .. "' in Resync does not exist" end
+  end
+
+  c.actions = {}
+  for i = 1, ACTIONS do
+    local v = getvar("Action" .. i)
+    if v and trim(v) ~= "" then
+      local every, phase, cmd = trim(v):match("^(%d+)%s+(%d+)%s+(.+)$")
+      every, phase = tonumber(every), tonumber(phase)
+      if every and every >= 1 and phase and phase < every then
+        c.actions[#c.actions + 1] = { label = "Action" .. i, every = every, phase = phase, command = cmd }
+      else
+        problems[#problems + 1] = "Action" .. i .. " must be '<every N beats> <phase 0..N-1> <command>', not '" .. v .. "'"
+      end
+    end
+  end
+
+  c.interfaces = {}
+  for a in c.Interfaces:gmatch("[^,%s]+") do c.interfaces[#c.interfaces + 1] = a end
+  return c, problems
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- Small helpers
+
+local function median_and_p90(values)
+  local v = table.move(values, 1, #values, 1, {})
+  table.sort(v)
+  if #v == 0 then return nil, nil end
+  return v[(#v + 1) // 2], v[math.max(1, math.floor(#v * 0.9 + 0.5))]
+end
+
+local function fmt(x, digits)
+  if x == nil then return "" end
+  return string.format("%." .. (digits or 3) .. "f", x)
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- The loop
+
+local running = false
+
+local function run()
+  local P = type(signalTable) == "table" and signalTable.beat_sync_protocol
+  local F = type(signalTable) == "table" and signalTable.beat_sync_follower
+  if not (P and F) then
+    ErrPrintf("gma3_beat_sync: the protocol or follower component is missing; reimport gma3_beat_sync.xml")
+    return
+  end
+  local socket = require("socket")
+  local function now_us() return P.llround(socket.gettime() * 1e6) end
+
+  local status = { state = "starting", version = VERSION, errors = {}, warnings = {} }
+  shared.status, shared.control = status, { stop = false }
+  local control = shared.control
+
+  local config, problems = read_config()
+  status.problems = problems
+
+  -- Sockets: the session's multicast group, and one unicast socket for measurement pings.
+  local mc, uc = socket.udp4(), socket.udp4()
+  local function close()
+    if mc then mc:close() mc = nil end
+    if uc then uc:close() uc = nil end
+  end
+  mc:setoption("reuseaddr", true)
+  mc:setoption("reuseport", true)
+  local ok, err = mc:setsockname("0.0.0.0", P.PORT)
+  if not ok then
+    close()
+    status.state = "error"
+    setvar("State", "error")
+    setvar("Error", "cannot listen on UDP port " .. P.PORT .. ": " .. tostring(err))
+    ErrPrintf("gma3_beat_sync: cannot listen on UDP port %d: %s", P.PORT, tostring(err))
+    return
+  end
+  status.joined = {}
+  for _, iface in ipairs(config.interfaces) do
+    local jok, jerr = mc:setoption("ip-add-membership", { multiaddr = P.MULTICAST_ADDRESS, interface = iface })
+    status.joined[#status.joined + 1] = iface .. (jok and "" or (" (failed: " .. tostring(jerr) .. ")"))
+  end
+  mc:settimeout(0)
+  uc:setsockname("0.0.0.0", 0)
+
+  local follower = F.new(P, { quantum = config.quantum })
+  local frames, frame_periods, dropped = 0, {}, 0
+  status.frame_periods_us = frame_periods -- the last FRAME_WINDOW frame periods, oldest first
+  local last_frame_us = now_us()
+  local tempo_written, consecutive_errors = nil, 0
+  local showfile = Root().ManetSocket and Root().ManetSocket.Showfile
+  status.show = showfile
+
+  local function report(kind, text)
+    local list = status[kind]
+    list[#list + 1] = text
+    if #list > 10 then table.remove(list, 1) end
+    status["last_" .. kind:sub(1, -2)] = text
+  end
+
+  local function command(label, cmd, beat, at_us, t_us)
+    local ok2, result = pcall(Cmd, cmd)
+    local timing = at_us and string.format(" (%+.1f ms)", (t_us - at_us) / 1000) or ""
+    status.last_action = string.format("%s: %s%s%s%s", label, cmd, beat and (" at beat " .. beat // 1000000) or "",
+      timing, ok2 and "" or (" failed: " .. tostring(result)))
+    if not ok2 then report("errors", label .. " failed: " .. tostring(result)) end
+  end
+
+  local function write_tempo(bpm)
+    local m = config.master_handle
+    if not m then return end
+    -- A speed master's base tempo stops at 225 BPM (BS-01); raise its SpeedScale for faster sessions.
+    -- "At BPM" sets the effective tempo whatever the scale (gma3-mcp SB-06).
+    local factor = 1
+    while bpm / factor > 225 and factor < 8 do factor = factor * 2 end
+    if factor > 1 then
+      local scale = "Mul" .. factor
+      -- the property reads as an enum index (0 = One, 1 = Mul2); its name comes from the Display role
+      local ok_get, current = pcall(function() return m:Get("SpeedScale", Enums.Roles.Display) end)
+      if not ok_get or tostring(current) ~= scale then pcall(function() m:Set("SpeedScale", scale) end) end
+    end
+    local ok3, e = pcall(Cmd, string.format("Master 3.%d At BPM %.4f", config.master, bpm))
+    if ok3 then tempo_written = bpm else report("errors", "speed master write failed: " .. tostring(e)) end
+  end
+
+  local function handle(ev, t_us)
+    if ev.kind == "joined" then
+      report("warnings", "joined session " .. P.hex(ev.session_id))
+      tempo_written = nil
+      if config.OnJoin ~= "" then command("OnJoin", config.OnJoin) end
+    elseif ev.kind == "left" then
+      report("warnings", "left session " .. P.hex(ev.session_id))
+      if config.OnLeave ~= "" then command("OnLeave", config.OnLeave) end
+    elseif ev.kind == "tempo" then
+      if not tempo_written or math.abs(ev.bpm - tempo_written) >= config.threshold then write_tempo(ev.bpm) end
+    elseif ev.kind == "start" then
+      if config.OnStart ~= "" then command("OnStart", config.OnStart) end
+    elseif ev.kind == "stop" then
+      if config.OnStop ~= "" then command("OnStop", config.OnStop) end
+    elseif ev.kind == "beat" then
+      local k = ev.beat // 1000000
+      if ev.bar then
+        for _, n in ipairs(config.resync) do command("Resync", "ReSync Sequence " .. n, ev.beat, ev.at_us, t_us) end
+        if config.OnBar ~= "" then command("OnBar", config.OnBar, ev.beat, ev.at_us, t_us) end
+      end
+      if config.OnBeat ~= "" then command("OnBeat", config.OnBeat, ev.beat, ev.at_us, t_us) end
+      for _, a in ipairs(config.actions) do
+        if (k - a.phase) % a.every == 0 then command(a.label, a.command, ev.beat, ev.at_us, t_us) end
+      end
+    end
+  end
+
+  -- Writes the status variables; final_state ("stopped", "error") replaces the follower's state on the way out.
+  local function publish(now, final_state)
+    local s = follower:status(now)
+    status.state = final_state
+      or (#status.problems > 0 and s.state == "no session" and "no session (configuration problems)" or s.state)
+    status.peers, status.sessions, status.session = s.peers, s.sessions, s.session
+    status.tempo, status.beat, status.phase, status.playing = s.bpm, s.beat, s.phase, s.playing
+    status.drift_ms_per_min = s.drift_us_per_min and s.drift_us_per_min / 1000 or nil
+    status.counters = s.counters
+    local med, p90 = median_and_p90(frame_periods)
+    status.frame_ms = med and med / 1000
+    status.frame_jitter_ms = med and (p90 - med) / 1000
+    status.dropped_frames = dropped
+    status.updated = os.date("!%Y-%m-%dT%H:%M:%SZ")
+    setvar("State", status.state)
+    setvar("Peers", tostring(s.peers))
+    setvar("Session", s.session or "")
+    setvar("Tempo", fmt(s.bpm, 3))
+    setvar("Beat", fmt(s.beat, 2))
+    setvar("Phase", fmt(s.phase, 2))
+    setvar("Playing", s.playing == nil and "" or (s.playing and "yes" or "no"))
+    setvar("LastAction", status.last_action or "")
+    setvar("DriftMsPerMin", fmt(status.drift_ms_per_min, 3))
+    setvar("FrameMs", fmt(status.frame_ms, 1))
+    setvar("FrameJitterMs", fmt(status.frame_jitter_ms, 1))
+    setvar("DroppedFrames", tostring(dropped))
+    setvar("MissedBeats", tostring(s.counters.missed_beats or 0))
+    setvar("Problems", table.concat(status.problems, "; "))
+    setvar("Error", status.last_error or "")
+    setvar("Version", VERSION)
+    setvar("Updated", status.updated)
+  end
+
+  local function frame()
+    local now = now_us()
+    local period = now - last_frame_us
+    last_frame_us = now
+    frames = frames + 1
+    if frames > 1 then
+      frame_periods[#frame_periods + 1] = period
+      if #frame_periods > FRAME_WINDOW then table.remove(frame_periods, 1) end
+      local med = median_and_p90(frame_periods)
+      if #frame_periods >= 30 and period > 1.5 * med then
+        dropped = dropped + 1
+        status.last_dropped = string.format("frame of %.1f ms (median %.1f)", period / 1000, med / 1000)
+      end
+    end
+
+    if frames % CONFIG_EVERY == 0 then
+      local sf = Root().ManetSocket and Root().ManetSocket.Showfile
+      if sf ~= showfile then
+        report("warnings", "show loaded: " .. tostring(sf))
+        showfile, status.show = sf, sf
+        tempo_written = nil
+      end
+      config, status.problems = read_config()
+      follower:set_quantum(config.quantum)
+    end
+
+    for _ = 1, MAX_PACKETS do
+      local d = mc:receivefrom()
+      if not d then break end
+      follower:discovery(d, now_us())
+    end
+    uc:settimeout(0)
+    for _ = 1, MAX_PACKETS do
+      local d = uc:receive()
+      if not d then break end
+      follower:pong(d, now_us())
+    end
+    -- Measurement exchanges: send a ping, wait up to 3 ms for its pong, within the frame's budget.
+    local start, n = now_us(), 0
+    uc:settimeout(0.003)
+    while n < MAX_EXCHANGES_PER_FRAME and now_us() - start < MEASURE_BUDGET_US do
+      local ping = follower:next_ping(now_us())
+      if not ping then break end
+      uc:sendto(ping.data, ping.address, ping.port)
+      n = n + 1
+      local d = uc:receive()
+      if not d then break end
+      follower:pong(d, now_us())
+    end
+    uc:settimeout(0)
+
+    local med = median_and_p90(frame_periods)
+    local t = now_us()
+    for _, ev in ipairs(follower:frame(t, med or 16667, { lead_us = config.lead_us, always = not config.start_stop })) do
+      handle(ev, t + config.lead_us)
+    end
+
+    if frames % STATUS_EVERY == 0 then publish(now_us()) end
+  end
+
+  running = true
+  Printf("gma3_beat_sync %s: following (joined on %s)", VERSION, table.concat(status.joined, ", "))
+  publish(now_us())
+  while not control.stop do
+    local fok, ferr = pcall(frame)
+    if fok then
+      consecutive_errors = 0
+    else
+      consecutive_errors = consecutive_errors + 1
+      status.last_error = tostring(ferr)
+      report("errors", tostring(ferr))
+      if consecutive_errors >= MAX_ERRORS then
+        ErrPrintf("gma3_beat_sync: stopping after %d failing frames: %s", consecutive_errors, tostring(ferr))
+        break
+      end
+    end
+    coroutine.yield()
+  end
+  close()
+  running = false
+  pcall(publish, now_us(), control.stop and "stopped" or "error")
+  Printf("gma3_beat_sync: %s", status.state)
+end
+
+local function print_status()
+  local s = shared.status
+  if not s then Printf("gma3_beat_sync %s: not started", VERSION) return end
+  Printf("gma3_beat_sync %s: %s, %s peer(s), tempo %s, beat %s, playing %s", VERSION, tostring(s.state),
+    tostring(s.peers), fmt(s.tempo, 2), fmt(s.beat, 2), tostring(s.playing))
+  if s.problems and #s.problems > 0 then Printf("  problems: %s", table.concat(s.problems, "; ")) end
+  if s.last_action then Printf("  last action: %s", s.last_action) end
+  if s.last_error then Printf("  last error: %s", s.last_error) end
+end
+
+local function Main(_, argument)
+  local arg = tostring(argument or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  if arg == "stop" then
+    if shared.control then shared.control.stop = true end
+    return
+  elseif arg == "status" then
+    print_status()
+    return
+  elseif arg ~= "" and arg ~= "start" then
+    ErrPrintf('gma3_beat_sync: unknown argument "%s" (use start, stop or status)', arg)
+    return
+  end
+  if running then
+    Printf("gma3_beat_sync: already running")
+    return
+  end
+  run()
+end
+
+local function Cleanup() end
+
+return Main, Cleanup

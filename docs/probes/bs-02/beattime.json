@@ -1,0 +1,71 @@
+{
+  "scenario": "beattime",
+  "checks": [
+    {
+      "ok": true,
+      "what": "BEATTIME-1: no session",
+      "detail": "no session"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-1: starting without a session leaves the speed master",
+      "detail": {
+        "fader": 49.999970197678,
+        "scale": "0",
+        "bpm": 59.999931804297375
+      }
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-1: and runs no beat action"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-1: stopping leaves the speed master",
+      "detail": {
+        "fader": 49.999970197678,
+        "scale": "0",
+        "bpm": 59.999931804297375
+      }
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: the second peer is seen",
+      "detail": "2"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: the session keeps its tempo (120)",
+      "detail": "120.000"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: beat actions before and after the join"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: no jump in the beat actions' lag when the peer joins (< 6 ms)",
+      "detail": -1.56
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: the join does not change the session timeline"
+    },
+    {
+      "ok": true,
+      "what": "BEATTIME-2: no beats missed across the join"
+    }
+  ],
+  "ok": true,
+  "beattime2": {
+    "before": {
+      "changes": 6,
+      "meanMs": 19.25
+    },
+    "after": {
+      "changes": 6,
+      "meanMs": 17.69
+    }
+  },
+  "masterRestored": true
+}

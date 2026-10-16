@@ -1,0 +1,119 @@
+{
+  "scenario": "timing",
+  "checks": [
+    {
+      "ok": true,
+      "what": "the plugin follows the peer",
+      "detail": "following"
+    },
+    {
+      "ok": true,
+      "what": "the speed master has the session tempo",
+      "detail": 127.9997
+    },
+    {
+      "ok": true,
+      "what": "a Go on every beat in every window (7 or 8 per 3.7 s)"
+    },
+    {
+      "ok": true,
+      "what": "no drift of the beat actions (< 1.5 ms/min)",
+      "detail": -0.59
+    },
+    {
+      "ok": true,
+      "what": "no missed beats",
+      "detail": "0"
+    }
+  ],
+  "ok": true,
+  "windows": [
+    {
+      "atS": 4,
+      "changes": 7,
+      "meanMs": 23.91,
+      "sdMs": 4.42
+    },
+    {
+      "atS": 34,
+      "changes": 8,
+      "meanMs": 26.4,
+      "sdMs": 3.56
+    },
+    {
+      "atS": 64,
+      "changes": 8,
+      "meanMs": 21.57,
+      "sdMs": 9.17
+    },
+    {
+      "atS": 94,
+      "changes": 8,
+      "meanMs": 25.82,
+      "sdMs": 10.73
+    },
+    {
+      "atS": 124,
+      "changes": 8,
+      "meanMs": 28.21,
+      "sdMs": 12.55
+    },
+    {
+      "atS": 154,
+      "changes": 7,
+      "meanMs": 20.03,
+      "sdMs": 8.94
+    },
+    {
+      "atS": 184,
+      "changes": 8,
+      "meanMs": 18.91,
+      "sdMs": 5.63
+    },
+    {
+      "atS": 214,
+      "changes": 7,
+      "meanMs": 26.77,
+      "sdMs": 8.94
+    },
+    {
+      "atS": 244,
+      "changes": 8,
+      "meanMs": 21.89,
+      "sdMs": 12.97
+    },
+    {
+      "atS": 274,
+      "changes": 8,
+      "meanMs": 16.88,
+      "sdMs": 8.12
+    },
+    {
+      "atS": 304,
+      "changes": 8,
+      "meanMs": 26.29,
+      "sdMs": 10.59
+    }
+  ],
+  "lagMs": 23.33,
+  "driftMsPerMin": -0.59,
+  "status": {
+    "State": "following",
+    "DroppedFrames": "398",
+    "MissedBeats": "0",
+    "Playing": "yes",
+    "Tempo": "128.000",
+    "Beat": "657.96",
+    "Peers": "1",
+    "LastAction": "OnBeat: Go+ Sequence 950 at beat 657 (+2.9 ms)",
+    "counters": {
+      "failed": 0,
+      "measurements": 11,
+      "pongs": 561,
+      "unpaired_pongs": 0,
+      "packets": 2442,
+      "rejected": 0
+    }
+  },
+  "masterRestored": true
+}

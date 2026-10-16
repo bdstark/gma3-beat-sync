@@ -103,6 +103,15 @@ Questions:
 - Link test plan cases: BEATTIME-1, BEATTIME-2 and STARTSTOPSTATE-1, against the test peer and, once, against
   Ableton Live.
 
+**Status:** implemented in `plugin/gma3_beat_sync.xml` (the plugin, `gma3_beat_sync.lua`; the follower,
+`beat_sync_follower.lua`; the protocol, `beat_sync_protocol.lua`), documented in [docs/plugin.md](docs/plugin.md).
+Configuration and status are console global variables `BeatSync.<Key>` plus the shared Lua table `BeatSync`.
+Live on onPC 2.5.1 against the test peer
+([record](docs/probes/bs-02-follower-plugin-2026-10-16.md)): beat actions 23 ms after the beat as observed (about a
+frame of console latency; `LeadMs` 17 brings it to 8 ms), no drift over 5 minutes; BEATTIME-1, BEATTIME-2 and
+STARTSTOPSTATE-1 pass; leaving, rejoining and the ttl are handled. Open: the cases against Ableton Live, and a show
+load on the console.
+
 ## BS-03 — Full peer (only if BS-01 shows it is safe)
 
 **Request:** Appear as a Link peer, send start/stop and propose tempo changes from the console.
