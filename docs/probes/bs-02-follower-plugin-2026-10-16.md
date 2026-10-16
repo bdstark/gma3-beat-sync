@@ -97,6 +97,16 @@ Live re-run on onPC 2.5.1 with that code ([bs-02/round1-*.json](bs-02/)): `leave
 (ByeBye 426 ms, ttl 5.07 s; BEATTIME-2 lag 19.7 → 22.2 ms; the first beat action on the start bar). Changing
 `BeatSync.Master` from 12 to 13 during a steady 133.5 BPM session wrote master 13 within 2 s.
 
+## Review round 2 (PR #4)
+
+- The ±2^53 range check used `math.abs`, which leaves `math.mininteger` negative in Lua, so that value passed. Each
+  bound is now compared directly (`follower_test.lua`: both signed extremes in all four fields; `plugin_test.lua`:
+  `math.mininteger` as a beat origin).
+- A session with no IPv4 measurement endpoint, first in order, was picked for measurement again and again, so no
+  other session was ever measured. Only sessions with such an endpoint are candidates now, and one becomes a
+  candidate when its endpoint is announced (`follower_test.lua`: an unmeasurable session ahead of a healthy one, its
+  endpoint arriving later, and the re-measurement of the followed session).
+
 ## Console facts
 
 - **Components:** the plugin's three `ComponentLua` chunks run at import with a shared signal table; the protocol and

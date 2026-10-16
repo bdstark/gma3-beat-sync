@@ -136,8 +136,10 @@ session …", "show loaded: …"), `frame_periods_us` (the last 120 frame period
   measured and their peers (`counters.evicted_peers`, `evicted_sessions`, `dropped`).
 - **Measurement:** a measurement fails after 5 unanswered pings, 20 answers that bring no timing, 300 pings or 2 s.
   A session whose first measurement failed is tried again after 1 s, then 2, 4 … up to 30 s, while it is
-  announced (`counters.failed`, `retries`; `failed_sessions` in the status table). When the followed session
-  leaves, the plugin moves at once to another measured session, if there is one.
+  announced (`counters.failed`, `retries`; `failed_sessions` in the status table). Only a session with a peer that
+  announces an IPv4 measurement endpoint is measured; one without waits until such a peer appears and does not hold
+  up the others. When the followed session leaves, the plugin moves at once to another measured session, if there
+  is one.
 
 ## Network and security
 

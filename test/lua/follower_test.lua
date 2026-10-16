@@ -28,7 +28,7 @@ local function peer(node, opts)
     node = node, session = opts.session or node, offset = opts.offset or 0, ttl = opts.ttl or 5,
     mpb = opts.mpb or 500000, beat_origin = opts.beat_origin or 0, time_origin = opts.time_origin or 0,
     playing = opts.playing or false, ss_beats = 0, ss_time = opts.ss_time or 1,
-    address = opts.address or "127.0.0.1", port = opts.port or 50000,
+    address = opts.address or "127.0.0.1", port = opts.port or 50000, no_mep = opts.no_mep,
   }
 end
 
@@ -38,7 +38,7 @@ local function alive(p, mtype)
     .. entry("tmln", pack(">i8i8i8", p.mpb, p.beat_origin, p.time_origin))
     .. entry("sess", p.session)
     .. entry("stst", pack(">I1i8i8", p.playing and 1 or 0, p.ss_beats, p.ss_time))
-    .. entry("mep4", pack(">I1I1I1I1I2", tonumber(a), tonumber(b), tonumber(c), tonumber(d), p.port))
+    .. (p.no_mep and "" or entry("mep4", pack(">I1I1I1I1I2", tonumber(a), tonumber(b), tonumber(c), tonumber(d), p.port)))
 end
 
 local function byebye(p) return "_asdp_v\1" .. pack(">I1I1I2", 3, 0, 0) .. p.node end
@@ -514,6 +514,65 @@ do
   f:discovery(alive(A), t)
   f:frame(t, 16667)
   check(f.n_peers == 1, "peers announcing a 255 s ttl are dropped after 30 s: " .. tostring(f.n_peers))
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- Review round 2 (PR #4)
+
+-- 1. Signed extremes in every bounded field are rejected (math.abs(math.mininteger) is negative in Lua)
+do
+  for _, field in ipairs({ "beat_origin", "time_origin", "ss_beats", "ss_time" }) do
+    for _, v in ipairs({ math.mininteger, math.maxinteger, -2 ^ 53 - 2, 2 ^ 53 + 2 }) do
+      local A = peer("AAAAAAAA", { port = 50001 })
+      A[field] = math.tointeger(v) or v
+      local f = F.new(P)
+      f:discovery(alive(A), 0)
+      check(f.n_sessions == 0 and f.counters.invalid_timelines == 1,
+        field .. " = " .. string.format("%.0f", v) .. " is rejected and counted")
+    end
+  end
+  for _, field in ipairs({ "beat_origin", "time_origin", "ss_beats", "ss_time" }) do
+    for _, v in ipairs({ -(2 ^ 53), 2 ^ 53 }) do
+      local A = peer("AAAAAAAA", { port = 50001 })
+      A[field] = math.tointeger(v)
+      local g = F.new(P)
+      g:discovery(alive(A), 0)
+      check(g.n_sessions == 1, field .. " = " .. string.format("%.0f", v) .. " (the edge) is accepted")
+    end
+  end
+end
+
+-- 2. A session that cannot be measured (no IPv4 measurement endpoint) does not block the others
+do
+  local A = peer("AAAAAAAA", { offset = 1000000, port = 50001, no_mep = true }) -- smallest id, no endpoint
+  local B = peer("BBBBBBBB", { offset = 2000000, port = 50002 })
+  local f = F.new(P)
+  f:discovery(alive(A), 0)
+  f:discovery(alive(B), 0)
+  local t = measure(f, { [50001] = A, [50002] = B }, 0)
+  check(f.sessions[B.session].xform and f.current == B.session, "B is measured and followed despite A ahead of it")
+  check(not f.sessions[A.session].xform and not f.sessions[A.session].failed, "A is neither measured nor failed")
+  -- A's endpoint arrives later: A becomes measurable
+  A.no_mep = false
+  f:discovery(alive(A), t)
+  f:discovery(alive(B), t)
+  t = measure(f, { [50001] = A, [50002] = B }, t)
+  check(f.sessions[A.session].xform, "A is measured once its endpoint is announced")
+  -- the followed session is re-measured after 30 s even while an unmeasurable session sorts first
+  local C = peer("00000000", { offset = 0, port = 50003, no_mep = true })
+  local before = f.counters.measurements
+  for _ = 1, 31 do
+    t = t + 1000000
+    for _, x in ipairs({ A, B, C }) do f:discovery(alive(x), t) end
+  end
+  measure(f, { [50001] = A, [50002] = B, [50003] = C }, t)
+  check(f.counters.measurements > before, "the followed session is re-measured with an unmeasurable C first in order")
+  -- bounded: with only unmeasurable sessions, next_ping returns nil every time and nothing is failed
+  local g = F.new(P)
+  g:discovery(alive(C), 0)
+  local pings = 0
+  for i = 1, 100 do if g:next_ping(i * 1000) then pings = pings + 1 end end
+  check(pings == 0 and g.counters.failed == 0, "no pings and no failures for a session without an endpoint")
 end
 
 print(string.format("follower_test: %d checks, %d failures", checks, failures))

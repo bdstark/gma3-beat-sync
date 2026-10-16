@@ -74,14 +74,18 @@ end
 ------------------------------------------------------------------------------------------------------------------
 -- Packets
 
+-- Compared against both bounds directly: math.abs(math.mininteger) is still negative in Lua.
+local function in_range(v) return v >= -MAX_ABS and v <= MAX_ABS end
+
 local function valid_timeline(tl)
   return math.type(tl.micros_per_beat) == "integer" and tl.micros_per_beat >= MIN_MPB and tl.micros_per_beat <= MAX_MPB
-    and math.abs(tl.beat_origin) <= MAX_ABS and math.abs(tl.time_origin) <= MAX_ABS
+    and in_range(tl.beat_origin) and in_range(tl.time_origin)
 end
 
 local function valid_start_stop(ss)
-  return ss == nil or (math.abs(ss.beats) <= MAX_ABS and math.abs(ss.timestamp) <= MAX_ABS)
+  return ss == nil or (in_range(ss.beats) and in_range(ss.timestamp))
 end
+F.valid_start_stop = valid_start_stop
 F.valid_timeline = valid_timeline
 
 -- Removes the entry of `tbl` seen longest ago among those `protected` does not keep; returns its key, or nil when
@@ -214,18 +218,27 @@ function Follower:measurement_peer(session_id)
 end
 
 -- The session that needs a measurement next: one never measured (a failed one once its retry time has come), or
--- the current one after 30 s.
+-- the current one after 30 s. Only sessions with a peer that announces an IPv4 measurement endpoint are candidates,
+-- so a session that cannot be measured never blocks the others; it becomes a candidate when such a peer appears.
 function Follower:session_to_measure(now_us)
+  local measurable = {}
+  for _, p in pairs(self.peers) do
+    if p.mep4 then measurable[p.session_id] = true end
+  end
   local pick
   for id, s in pairs(self.sessions) do
-    if not s.xform and (not s.failed or now_us >= s.retry_us) and (not pick or id < pick) then pick = id end
+    if measurable[id] and not s.xform and (not s.failed or now_us >= s.retry_us) and (not pick or id < pick) then
+      pick = id
+    end
   end
   if pick then
     if self.sessions[pick].failed then self.counters.retries = self.counters.retries + 1 end
     return pick
   end
   local cur = self.current and self.sessions[self.current]
-  if cur and cur.measured_us and now_us - cur.measured_us >= REMEASURE_US then return self.current end
+  if cur and measurable[self.current] and cur.measured_us and now_us - cur.measured_us >= REMEASURE_US then
+    return self.current
+  end
   return nil
 end
 

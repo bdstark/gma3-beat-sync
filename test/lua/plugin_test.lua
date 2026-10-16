@@ -467,5 +467,18 @@ do
   check(c.vars["BeatSync.State"] == "following", "still following the real peer: " .. tostring(c.vars["BeatSync.State"]))
 end
 
+------------------------------------------------------------------------------------------------------------------
+-- Review round 2 (PR #4): the minimum integer as a beat origin is rejected through the plugin
+
+do
+  local c = console({ Master = "3" })
+  c.peer.beat_origin = math.mininteger
+  c.run(2)
+  check(c.vars["BeatSync.State"] ~= "following", "a beat origin of math.mininteger is not followed: "
+    .. tostring(c.vars["BeatSync.State"]))
+  check(#cmds_matching(c, "^Master") == 0, "and drives no speed master")
+  check((c.env.BeatSync.status.counters.invalid_timelines or 0) > 0, "and is counted as invalid")
+end
+
 print(string.format("plugin_test: %d checks, %d failures", checks, failures))
 if failures > 0 then os.exit(1) end
