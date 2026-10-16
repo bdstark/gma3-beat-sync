@@ -37,7 +37,7 @@ if (!seq || !master) {
 const protocol = readFileSync(join(root, "plugin", "beat_sync_protocol.lua"), "utf8");
 const chunk = readFileSync(join(here, "window_chunk.lua"), "utf8");
 const code = (action, frames) =>
-  `local P = (function()\n${protocol}\nend)()\nlocal SEQ, MASTER, ACTION, FRAMES = ${seq}, ${master}, ${action ? `"${action}"` : "nil"}, ${frames}\n${chunk}`;
+  `local P = (function(...)\n${protocol}\nend)()\nlocal SEQ, MASTER, ACTION, FRAMES = ${seq}, ${master}, ${action ? `"${action}"` : "nil"}, ${frames}\n${chunk}`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const peer = spawn(join(root, "build", "tools", "bin", "gbs-test-peer"),
