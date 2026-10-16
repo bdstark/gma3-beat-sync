@@ -12,6 +12,11 @@
 
 local socket = require("socket")
 
+-- Packets read per frame in each mode; the rest wait for the next frame, so a flooded socket cannot keep the
+-- plugin thread from yielding (or from seeing a stop). The BS-01 measurements were taken before this bound was added;
+-- they saw at most a couple of packets per frame, far below it.
+local MAX_PACKETS = 32
+
 local function now() return socket.gettime() end
 
 local function summarize(ds)
@@ -41,7 +46,10 @@ local function loop(frames)
   local last = now()
   for i = 1, frames do
     if st.stop then break end
-    while u:receivefrom() do st.packets = st.packets + 1 end
+    local n = 0
+    while n < MAX_PACKETS and u:receivefrom() do n = n + 1 end
+    st.packets = st.packets + n
+    if n == MAX_PACKETS then st.capped = (st.capped or 0) + 1 end
     local t = now()
     st.deltas[#st.deltas + 1] = (t - last) * 1000
     last = t
@@ -92,10 +100,11 @@ local function responder(port, frames)
   local function entry(key, value) return key .. string.pack(">I4", #value) .. value end
   for i = 1, frames do
     if st.stop then break end
-    local n = 0
-    while true do
+    local n, reads = 0, 0
+    while reads < MAX_PACKETS do
       local d, ip, p = u:receivefrom()
       if not d then break end
+      reads = reads + 1
       if #d >= 9 and d:sub(1, 9) == "_link_v\1\1" then
         local ghost = math.floor(now() * 1e6 + 0.5)
         u:sendto("_link_v\1\2" .. entry("sess", "gbsprobe") .. entry("__gt", string.pack(">i8", ghost)) .. d:sub(10), ip, p)
@@ -103,6 +112,7 @@ local function responder(port, frames)
       end
     end
     st.answered = st.answered + n
+    if reads == MAX_PACKETS then st.capped = (st.capped or 0) + 1 end
     if n > 0 then st.per_frame[#st.per_frame + 1] = n end
     st.frames = i
     coroutine.yield()

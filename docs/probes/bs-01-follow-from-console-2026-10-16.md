@@ -34,9 +34,11 @@ files.
 - **Same machine needs loopback:** joining on `0.0.0.0` alone (the default interface) hears nothing from a peer on
   the same Mac (BS-04). The plugin must join on 127.0.0.1 as well as on the network interface. LuaSocket cannot
   list the interfaces, so the interface addresses come from configuration.
-- **Peers leaving:** a ByeBye removes a peer at once; a peer that stops announcing is dropped when its ttl (5 s)
-  passes (`discovery/PeerGateway.hpp`). Both are covered by fixtures (BS-04) and by BS-02's follower tests; not
-  repeated live here.
+- **Peers leaving, in Link:** a ByeBye (message type 3) removes a peer at once
+  (`discovery/UdpMessenger.hpp`, `receiveByeBye`); a peer that stops announcing is dropped when its ttl passes
+  (5 s, `discovery/PeerGateway.hpp`, the prune timer). This probe established only that ByeBye messages are
+  decoded (BS-04's captured fixtures). **Removing peers from the follower's state, on a ByeBye and after the ttl, is
+  not tested here; it is BS-02's to implement and verify.**
 
 ## Measurement
 
@@ -140,7 +142,7 @@ window, so changes in the mean are drift.
 
 | Question | Answer |
 | --- | --- |
-| Discovery: receive, parse, peers leaving | yes, with a loopback membership for same-machine peers; ByeBye and ttl |
+| Discovery: receive, parse, peers leaving | received and parsed, with a loopback membership for same-machine peers; ByeBye decoded; removal on ByeBye and after the ttl pending BS-02 |
 | Measurement from a silent follower | answered; 0.02 ms phase error against the test peer |
 | Two plugin loops | yes; `Timer(fn, 0, n)` also works |
 | Shared state | console global variables for configuration and status, plus a shared Lua table |
@@ -157,6 +159,13 @@ window, so changes in the mean are drift.
   sends bridge requests and refuses without the console lock.
 - [bs-01/pinger.mjs](bs-01/pinger.mjs): ping round trips.
 - [bs-01/drift.mjs](bs-01/drift.mjs) and [bs-01/window_chunk.lua](bs-01/window_chunk.lua): the chase drift runs;
-  their output is in [bs-01/results/](bs-01/results/). After the runs, `window_chunk.lua` got the same bounds as
-  BS-04's live chunk after its review (at most 32 packets per frame; measurement bounded per frame, in total and in
-  time; unpaired or pointless pongs fail it); what it measures did not change.
+  their output is in [bs-01/results/](bs-01/results/).
+- **The measurements above were taken with earlier versions of the scripts.** After the runs, review added bounds:
+  - `window_chunk.lua`: at most 32 packets per frame; measurement bounded per frame, in total and in time; unpaired
+    or pointless pongs fail it;
+  - `gbs_probe.lua`: at most 32 packets per frame in its loop and responder modes;
+  - `pinger.mjs`: null statistics when nothing answers, and a refused count that is not a positive integer.
+
+  None of the recorded runs came near the bounds (at most a couple of packets per frame, every ping answered), so
+  the revised scripts measure the same things; they were not re-run live. Offline tests:
+  `test/lua/probe_plugin_test.lua` and `docs/probes/bs-01/pinger_test.mjs`.
