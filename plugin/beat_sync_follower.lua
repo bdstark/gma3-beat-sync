@@ -17,6 +17,12 @@
 --   f:pong(bytes, now_us)                          -- each packet on the measurement socket
 --   local events = f:frame(now_us, frame_us)       -- once per console frame; see frame()
 --   f:status(now_us)                               -- a table for publishing
+--
+-- Peer mode (BS-03): F.new(P, { peer = { node_id = <8 bytes>, now_us = t, bpm = b } }) also takes part in Link as a
+-- full peer: it founds its own session (tempo b), which other peers can join, and it may join theirs by Link's rule;
+-- f:announcement(type, address, port) builds its Alive, Response or ByeBye; f:answer_ping(data, bound_us, now_us)
+-- builds the pong for a measurement ping; f:propose_tempo(bpm, now_us) and f:propose_start_stop(playing, now_us)
+-- change the session as a Link app's user would.
 
 local F = {}
 F.VERSION = "0.1.0"
@@ -68,6 +74,19 @@ function F.new(P, opts)
   self.counters = { packets = 0, rejected = 0, invalid_timelines = 0, pongs = 0, unpaired_pongs = 0,
     measurements = 0, failed = 0, retries = 0, evicted_peers = 0, evicted_sessions = 0 }
   self.last = {}       -- state seen by the previous frame()
+  if opts.peer then
+    -- link/Controller.hpp: a new node founds its own session, its node id is the session id, and its ghost time
+    -- starts at 0 (initXForm: intercept = -now); the timeline starts at beat 0 at ghost time 0 (initSessionState)
+    local pr = opts.peer
+    self.peer_mode, self.node_id = true, pr.node_id
+    local mpb = P.micros_per_beat(P.clamp_bpm(pr.bpm or 120))
+    self.sessions[pr.node_id] = { own = true, seen_us = pr.now_us,
+      timeline = { micros_per_beat = mpb, beat_origin = 0, time_origin = 0 },
+      start_stop = { playing = false, beats = 0, timestamp = 0 },
+      xform = { slope = 1.0, intercept = -pr.now_us }, measured_us = pr.now_us }
+    self.n_sessions = 1
+    self.current = pr.node_id
+  end
   return self
 end
 
@@ -123,9 +142,10 @@ function Follower:discovery(data, now_us)
     self.counters.rejected = self.counters.rejected + 1
     return
   end
+  if self.peer_mode and m.node_id == self.node_id then return end -- discovery/UdpMessenger.hpp ignores itself
   if m.type == P.BYEBYE then
     self:remove_peer(m.node_id)
-    return
+    return m
   end
   if not (m.session_id and m.timeline) then
     self.counters.rejected = self.counters.rejected + 1
@@ -181,6 +201,7 @@ function Follower:discovery(data, now_us)
   peer.session_id, peer.timeline, peer.start_stop = m.session_id, m.timeline, m.start_stop
   peer.mep4 = m.mep4 or peer.mep4
   peer.seen_us, peer.ttl_us = now_us, math.min(m.ttl * 1000000, MAX_TTL_US)
+  return m
 end
 
 -- Drops peers whose ttl has passed (discovery/PeerGateway.hpp, the prune timer) and sessions without peers. When
@@ -191,7 +212,8 @@ function Follower:prune(now_us)
     if now_us - p.seen_us > p.ttl_us then self:remove_peer(id) else alive[p.session_id] = true end
   end
   for id in pairs(self.sessions) do
-    if not alive[id] then self:remove_session(id) end
+    -- a peer is a member of its current session, so that session stays even without other peers
+    if not alive[id] and not (self.peer_mode and id == self.current) then self:remove_session(id) end
   end
   if self.measuring and not self.sessions[self.measuring.session_id] then self.measuring = nil end
   if self.current and not self.sessions[self.current] then
@@ -227,7 +249,7 @@ function Follower:session_to_measure(now_us)
   end
   local pick
   for id, s in pairs(self.sessions) do
-    if measurable[id] and not s.xform and (not s.failed or now_us >= s.retry_us) and (not pick or id < pick) then
+    if measurable[id] and not s.own and not s.xform and (not s.failed or now_us >= s.retry_us) and (not pick or id < pick) then
       pick = id
     end
   end
@@ -236,7 +258,7 @@ function Follower:session_to_measure(now_us)
     return pick
   end
   local cur = self.current and self.sessions[self.current]
-  if cur and measurable[self.current] and cur.measured_us and now_us - cur.measured_us >= REMEASURE_US then
+  if cur and not cur.own and measurable[self.current] and cur.measured_us and now_us - cur.measured_us >= REMEASURE_US then
     return self.current
   end
   return nil
@@ -332,6 +354,79 @@ function Follower:choose_session(id, now_us)
   local new = self.sessions[id].xform
   local diff = P.host_to_ghost(new, now_us) - P.host_to_ghost(cur, now_us)
   if diff > SESSION_EPS_US or (math.abs(diff) < SESSION_EPS_US and id < self.current) then self.current = id end
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- Peer mode (BS-03)
+
+local function entry(key, value) return string.pack(">I4I4", key, #value) .. value end
+
+-- The node's Alive (1), Response (2) or ByeBye (3): discovery/v1/Messages.hpp header, then the payload of
+-- link/PeerState.hpp: tmln, sess and stst of the current session, and the IPv4 measurement endpoint for the interface
+-- the message goes out on.
+function Follower:announcement(mtype, address, port)
+  local P = self.P
+  local head = "_asdp_v\1" .. string.pack(">I1I1I2", mtype, mtype == P.BYEBYE and 0 or P.DEFAULT_TTL_S, 0) .. self.node_id
+  if mtype == P.BYEBYE then return head end
+  local s = self.sessions[self.current]
+  local tl, ss = s.timeline, s.start_stop or { playing = false, beats = 0, timestamp = 0 }
+  local a, b, c, d = address:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+  return head
+    .. entry(P.KEY.tmln, string.pack(">i8i8i8", P.effective_micros_per_beat(tl), tl.beat_origin, tl.time_origin))
+    .. entry(P.KEY.sess, self.current)
+    .. entry(P.KEY.stst, string.pack(">I1i8i8", ss.playing and 1 or 0, ss.beats, ss.timestamp))
+    .. entry(P.KEY.mep4, string.pack(">I1I1I1I1I2", tonumber(a), tonumber(b), tonumber(c), tonumber(d), port))
+end
+
+-- The pong for a measurement ping (link/PingResponder.hpp: session id, ghost time, then the ping's payload), or nil
+-- when Link would not answer it. The ghost time is not taken at the reply: a plugin answers once per frame, so the
+-- ping has waited since bound_us (the earliest it can have arrived: the end of the previous look at the socket, or
+-- the previous reply); the stamp is half way between, where the measuring peer assumes it is (link/Measurement.hpp).
+-- The BS-03 probe measured 8 ms of error without this and under 0.2 ms with it.
+function Follower:answer_ping(data, bound_us, now_us)
+  local P = self.P
+  local m = P.decode_measurement(data)
+  if not (m and m.type == P.PING and m.answered) then return nil end
+  local s = self.sessions[self.current]
+  local stamp = P.llround((math.min(bound_us, now_us) + now_us) / 2)
+  self.counters.pings_answered = (self.counters.pings_answered or 0) + 1
+  return "_link_v\1\2" .. entry(P.KEY.sess, self.current)
+    .. entry(P.KEY.gt, string.pack(">i8", P.host_to_ghost(s.xform, stamp))) .. data:sub(10)
+end
+
+-- A tempo change from this node, as link/ClientSessionTimelines.hpp (updateSessionTimelineFromClient) makes one: the
+-- beat at now stays where it is, the new timeline starts there at the new tempo, and its beat origin is larger than
+-- the old one, so the other peers adopt it (link/Sessions.hpp).
+function Follower:propose_tempo(bpm, now_us)
+  local P = self.P
+  local s = self.sessions[self.current]
+  if not s then return false end
+  local ghost = P.host_to_ghost(s.xform, now_us)
+  local beat = P.to_beats(s.timeline, ghost)
+  local origin = math.max(beat, s.timeline.beat_origin + 1)
+  local mpb = P.micros_per_beat(P.clamp_bpm(bpm))
+  local tl = { micros_per_beat = mpb, beat_origin = origin, time_origin = ghost }
+  tl.time_origin = ghost - (P.from_beats(tl, beat) - ghost) -- keep the beat at now: origin beats lie after now when bumped
+  if not valid_timeline(tl) then return false end
+  s.timeline = tl
+  self.timeline_changed = true
+  self.counters.tempo_proposals = (self.counters.tempo_proposals or 0) + 1
+  return true
+end
+
+-- A start or a stop from this node (link/StartStopState.hpp, as Link's setIsPlaying with a requested beat does it): a
+-- start begins on the next bar of the session's grid, a stop at once; the newer timestamp makes the other peers adopt it.
+function Follower:propose_start_stop(playing, now_us)
+  local P = self.P
+  local s = self.sessions[self.current]
+  if not s then return false end
+  local ghost = P.host_to_ghost(s.xform, now_us)
+  local beat = P.to_beats(s.timeline, ghost)
+  local at = playing and P.next_phase_match(beat, 0, self.quantum) or beat
+  local old = s.start_stop
+  s.start_stop = { playing = playing, beats = at, timestamp = math.max(ghost, old and old.timestamp + 1 or ghost) }
+  self.counters.start_stop_proposals = (self.counters.start_stop_proposals or 0) + 1
+  return true
 end
 
 ------------------------------------------------------------------------------------------------------------------
@@ -467,6 +562,7 @@ function Follower:status(now_us)
     peers = n_peers,
     sessions = n_sessions,
     failed_sessions = failed, -- announced sessions whose measurement failed and is being retried
+    own_session = self.peer_mode and self.current == self.node_id or nil, -- peer mode: in the session it founded
     session = pos and self.P.hex(pos.session_id) or nil,
     bpm = pos and pos.bpm or nil,
     beat = pos and pos.beat / 1e6 or nil,

@@ -65,12 +65,20 @@ local function console(vars, opts_arg)
   local function udp()
     local s = { closed = false, memberships = {} }
     function s:setoption(k, v) if k == "ip-add-membership" then self.memberships[#self.memberships + 1] = v.interface end return 1 end
-    function s:setsockname(a, port) self.port = port return 1 end
+    function s:setsockname(a, port) self.address, self.port = a, port return 1 end
     function s:settimeout(t) self.timeout = t end
     function s:close() self.closed = true end
+    function s:getsockname() return self.address or "0.0.0.0", self.port == 0 and 54000 or self.port end
     function s:receivefrom()
       c.us = c.us + 2
-      if self.port == 20808 then return table.remove(c.mc_queue, 1) end
+      if self.port == 20808 then
+        local d = table.remove(c.mc_queue, 1)
+        if d then return d, "127.0.0.1", 50000 end
+        return nil
+      end
+      local d = self:receive()
+      if d then return d, "127.0.0.1", 50000 end
+      return nil
     end
     function s:sendto(data)
       c.us = c.us + 2

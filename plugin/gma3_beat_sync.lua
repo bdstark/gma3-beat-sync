@@ -13,6 +13,8 @@
 --   Plugin "gma3_beat_sync"            start following (runs until stopped)
 --   Plugin "gma3_beat_sync" "stop"     stop at the next frame
 --   Plugin "gma3_beat_sync" "status"   print the status to the command line history
+--   Plugin "gma3_beat_sync" "play"     peer mode: start the session (on its next bar)
+--   Plugin "gma3_beat_sync" "pause"    peer mode: stop the session
 --
 -- A show load ends the plugin's loop, and the plugin cannot start itself again: start it after loading a show
 -- (BS-02 record). When the console runs this chunk again at the load, it marks the status as not running.
@@ -57,6 +59,7 @@ local DEFAULTS = {
   TempoThreshold = "0.01",  -- BPM change that rewrites the speed master
   LeadMs = "0",             -- run beat actions this much early (the console applies a command a frame later)
   Interfaces = "127.0.0.1 0.0.0.0", -- addresses to join the session's multicast group on; 0.0.0.0 = default interface
+  Mode = "follow",          -- follow: listen only; peer: also announce and answer measurements as a Link peer (BS-03)
 }
 local ACTIONS = 16 -- BeatSync.Action1 .. BeatSync.Action16: "<every N beats> <phase> <command>"
 
@@ -120,6 +123,24 @@ local function read_config()
 
   c.interfaces = {}
   for a in c.Interfaces:gmatch("[^,%s]+") do c.interfaces[#c.interfaces + 1] = a end
+
+  local mode = c.Mode:lower()
+  if mode ~= "follow" and mode ~= "peer" then
+    problems[#problems + 1] = "Mode must be follow or peer, not '" .. c.Mode .. "'"
+    mode = "follow"
+  end
+  c.peer = mode == "peer"
+  -- a peer announces itself on each interface address it knows (0.0.0.0 only listens: it has no address to announce)
+  c.announce = {}
+  for _, a in ipairs(c.interfaces) do
+    local q = { a:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$") }
+    local ok = #q == 4
+    for _, x in ipairs(q) do if tonumber(x) > 255 then ok = false end end
+    if ok and a ~= "0.0.0.0" then c.announce[#c.announce + 1] = a end
+  end
+  if c.peer and #c.announce == 0 then
+    problems[#problems + 1] = "Mode peer needs an interface address other than 0.0.0.0 in Interfaces"
+  end
   return c, problems
 end
 
@@ -136,6 +157,21 @@ end
 local function fmt(x, digits)
   if x == nil then return "" end
   return string.format("%." .. (digits or 3) .. "f", x)
+end
+
+-- The effective tempo of a speed master: the fader's base tempo (BPM = 225 * (fader / 100) ^ log2(3.75), gma3-mcp
+-- SB-06; BS-01) times its SpeedScale, read by name (the property itself reads as an enum index, BS-02).
+local LOG2_375 = math.log(3.75, 2)
+local function master_bpm(m)
+  local okf, f = pcall(function() return m:GetFader({}) end)
+  if not okf or type(f) ~= "number" then return nil end
+  local oks, scale = pcall(function() return m:Get("SpeedScale", Enums.Roles.Display) end)
+  scale = oks and tostring(scale) or "One"
+  local factor = 1
+  local n = tonumber(scale:match("^Mul(%d+)$"))
+  local d = tonumber(scale:match("^Div(%d+)$"))
+  if n then factor = n elseif d then factor = 1 / d end
+  return 225 * (f / 100) ^ LOG2_375 * factor
 end
 
 ------------------------------------------------------------------------------------------------------------------
@@ -184,14 +220,50 @@ local function run()
   end
   mc:settimeout(0)
   uc:setsockname("0.0.0.0", 0)
+  local _, mep_port = uc:getsockname()
+  mep_port = tonumber(mep_port)
 
-  local follower = F.new(P, { quantum = config.quantum })
+  -- Peer mode (read when the plugin starts): a random node id, and a session founded at the speed master's current
+  -- tempo, so joining nothing changes the console's tempo (TEMPO-5). Announcements go out on each interface address.
+  local peer = config.peer and #config.announce > 0
+  local senders, node_id = {}, nil
+  if peer then
+    math.randomseed(math.floor(socket.gettime() * 1e6) % 2 ^ 31)
+    local bytes = {}
+    for i = 1, 8 do bytes[i] = string.char(math.random(0, 255)) end
+    node_id = table.concat(bytes)
+    for _, a in ipairs(config.announce) do
+      local sd = socket.udp4()
+      if sd:setsockname(a, 0) then
+        sd:setoption("ip-multicast-if", a)
+        sd:setoption("ip-multicast-loop", true)
+        senders[#senders + 1] = { address = a, sock = sd }
+      else
+        sd:close()
+        problems[#problems + 1] = "cannot send from " .. a
+      end
+    end
+    peer = #senders > 0
+  end
+  local close_listen = close
+  close = function()
+    close_listen()
+    for _, sd in ipairs(senders) do sd.sock:close() end
+    senders = {}
+  end
+  local start_bpm = 120
+  if peer and config.master_handle then start_bpm = master_bpm(config.master_handle) or 120 end
+  local follower = F.new(P, { quantum = config.quantum,
+    peer = peer and { node_id = node_id, now_us = now_us(), bpm = start_bpm } or nil })
+  status.mode = peer and "peer" or "follow"
+  status.node = node_id and P.hex(node_id) or nil
   local frames, frame_periods, dropped = 0, {}, 0
   status.frame_periods_us = frame_periods -- the last FRAME_WINDOW frame periods, oldest first
   local last_frame_us = now_us()
   -- What the speed master was last set to ({ master, bpm }); nil when it must be set (after joining, a show load or
   -- a change of BeatSync.Master). Reconciled every frame against the session's current tempo.
   local tempo_written, tempo_retry_us, consecutive_errors = nil, 0, 0
+  local tempo_settle_us, tempo_moves = 0, 0 -- peer mode: settle time after a write, and reads of an operator's change
   local showfile = Root().ManetSocket and Root().ManetSocket.Showfile
   status.show = showfile
 
@@ -281,6 +353,7 @@ local function run()
     if w and w.master == config.master and math.abs(pos.bpm - w.bpm) < config.threshold then return end
     if write_tempo(pos.bpm) then
       tempo_written = { master = config.master, bpm = pos.bpm }
+      tempo_settle_us = now + 500000 -- the fader moves a frame or two later; ignore it until then
     else
       tempo_written, tempo_retry_us = nil, now + 1000000
     end
@@ -342,8 +415,22 @@ local function run()
     setvar("MissedBeats", tostring(s.counters.missed_beats or 0))
     setvar("Problems", table.concat(status.problems, "; "))
     setvar("Error", status.last_error or "")
+    setvar("Mode", status.mode)
+    setvar("Node", status.node or "")
+    setvar("OwnSession", s.own_session == nil and "" or (s.own_session and "yes" or "no"))
     setvar("Version", VERSION)
     setvar("Updated", status.updated)
+  end
+
+  local ping_bound, next_announce_us, last_announce_us, announce_now, last_session = now_us(), 0, 0, true, nil
+  local sender_for
+  -- the sender whose network a peer's address is on: loopback for 127.x, otherwise the first other address
+  sender_for = function(ip)
+    local loop = ip:match("^127%.") ~= nil
+    for _, sd in ipairs(senders) do
+      if (sd.address:match("^127%.") ~= nil) == loop then return sd end
+    end
+    return senders[1]
   end
 
   local function frame()
@@ -373,15 +460,32 @@ local function run()
     end
 
     for _ = 1, MAX_PACKETS do
-      local d = mc:receivefrom()
+      local d, ip, port = mc:receivefrom()
       if not d then break end
-      follower:discovery(d, now_us())
+      local m = follower:discovery(d, now_us())
+      -- discovery/UdpMessenger.hpp: an Alive is answered with a Response to its sender
+      if peer and m and m.type == P.ALIVE and ip then
+        local sd = sender_for(ip)
+        if sd then sd.sock:sendto(follower:announcement(P.RESPONSE, sd.address, mep_port), ip, port) end
+      end
+    end
+    -- The measurement socket carries pongs for this console's measurements and, in peer mode, pings from peers
+    -- measuring the session through it; a ping is answered with a compensated ghost time (answer_ping).
+    local function on_uc(d, ip, port, bound)
+      local kind = d:byte(9)
+      if peer and kind == P.PING then
+        local pong = follower:answer_ping(d, bound, now_us())
+        if pong then uc:sendto(pong, ip, port) end
+        return now_us()
+      end
+      follower:pong(d, now_us())
+      return bound
     end
     uc:settimeout(0)
     for _ = 1, MAX_PACKETS do
-      local d = uc:receive()
+      local d, ip, port = uc:receivefrom()
       if not d then break end
-      follower:pong(d, now_us())
+      ping_bound = on_uc(d, ip, port, ping_bound)
     end
     -- Measurement exchanges: send a ping, wait up to 3 ms for its pong, within the frame's budget.
     local start, n = now_us(), 0
@@ -391,11 +495,49 @@ local function run()
       if not ping then break end
       uc:sendto(ping.data, ping.address, ping.port)
       n = n + 1
-      local d = uc:receive()
+      local waited = now_us()
+      local d, ip, port = uc:receivefrom()
       if not d then break end
-      follower:pong(d, now_us())
+      ping_bound = on_uc(d, ip, port, math.max(ping_bound, waited))
     end
     uc:settimeout(0)
+    ping_bound = now_us() -- a ping read from the next frame on cannot have arrived before this look
+
+    if peer then
+      -- the operator moved the speed master (not this plugin): propose the tempo to the session (TEMPO-1)
+      local t0 = now_us()
+      if frames % 3 == 0 and config.master_handle and tempo_written and tempo_written.master == config.master
+          and t0 >= tempo_settle_us then
+        local mb = master_bpm(config.master_handle)
+        if mb and math.abs(mb - tempo_written.bpm) >= config.threshold then
+          tempo_moves = tempo_moves + 1
+          if tempo_moves >= 2 and follower:propose_tempo(mb, t0) then
+            local proposed = follower:position(t0)
+            tempo_written = { master = config.master, bpm = proposed and proposed.bpm or mb }
+            report("warnings", string.format("tempo %.3f proposed to the session", tempo_written.bpm))
+            announce_now = true
+            tempo_moves = 0
+          end
+        else
+          tempo_moves = 0
+        end
+      end
+      -- play / pause from the plugin's commands (STARTSTOPSTATE-2)
+      if control.transport ~= nil then
+        follower:propose_start_stop(control.transport, t0)
+        report("warnings", control.transport and "start proposed to the session" or "stop proposed to the session")
+        control.transport = nil
+        announce_now = true
+      end
+      if follower.current ~= last_session then announce_now, last_session = true, follower.current end
+      -- announcements: every 250 ms, and at once (at most every 50 ms) after a change (discovery/UdpMessenger.hpp)
+      if t0 >= next_announce_us or (announce_now and t0 - last_announce_us >= 50000) then
+        for _, sd in ipairs(senders) do
+          sd.sock:sendto(follower:announcement(P.ALIVE, sd.address, mep_port), P.MULTICAST_ADDRESS, P.PORT)
+        end
+        last_announce_us, next_announce_us, announce_now = t0, t0 + P.BROADCAST_PERIOD_US, false
+      end
+    end
 
     local med = median_and_p90(frame_periods)
     local t = now_us()
@@ -425,6 +567,10 @@ local function run()
     end
     coroutine.yield()
   end
+  if peer then -- leave the session (discovery/UdpMessenger.hpp, sendByeBye)
+    for _, sd in ipairs(senders) do pcall(function()
+      sd.sock:sendto(follower:announcement(P.BYEBYE, sd.address, mep_port), P.MULTICAST_ADDRESS, P.PORT) end) end
+  end
   close()
   running = false
   pcall(publish, now_us(), control.stop and "stopped" or "error")
@@ -449,8 +595,17 @@ local function Main(_, argument)
   elseif arg == "status" then
     print_status()
     return
+  elseif arg == "play" or arg == "pause" then
+    -- peer mode: start or stop the session (a follower has no say in it)
+    if not running or not shared.control then Printf("gma3_beat_sync: not running") return end
+    if shared.status and shared.status.mode ~= "peer" then
+      ErrPrintf('gma3_beat_sync: "%s" needs BeatSync.Mode "peer"', arg)
+      return
+    end
+    shared.control.transport = arg == "play"
+    return
   elseif arg ~= "" and arg ~= "start" then
-    ErrPrintf('gma3_beat_sync: unknown argument "%s" (use start, stop or status)', arg)
+    ErrPrintf('gma3_beat_sync: unknown argument "%s" (use start, stop, status, play or pause)', arg)
     return
   end
   if running then
