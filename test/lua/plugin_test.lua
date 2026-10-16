@@ -31,8 +31,8 @@ local function entry(key, value) return key .. pack(">I4", #value) .. value end
 local FRAME = 16667
 
 -- A fresh console: returns the console table and the plugin's Main.
-local function console(vars)
-  local c = { us = 1000000, cmds = {}, printed = {}, vars = {}, mc_queue = {}, uc_queue = {}, sockets = {},
+local function console(vars, opts_arg)
+  local c = { us = 1000000, cmds = {}, printed = {}, vars = {}, indirect = {}, mc_queue = {}, uc_queue = {}, sockets = {},
     peer = { node = "PEERNODE", mpb = 500000, offset = 7000000, playing = true, ss_beats = 0, ss_time = 1,
       present = true },
     sequences = { [1] = {}, [5] = {} }, show = "Show A", cmd_error = nil }
@@ -102,18 +102,29 @@ local function console(vars)
       return "Ok"
     end,
     Enums = { Roles = { Display = "Display" } },
+    CmdIndirect = function(cmd) c.indirect[#c.indirect + 1] = cmd end,
     Printf = function(f, ...) c.printed[#c.printed + 1] = string.format(f, ...) end,
     ErrPrintf = function(f, ...) c.printed[#c.printed + 1] = "ERROR " .. string.format(f, ...) end,
   }, { __index = _G })
   env._G = env
-  local sig = {}
-  assert(load(read("plugin/beat_sync_protocol.lua"), "=protocol", "t", env))("gma3_beat_sync", "beat_sync_protocol", sig)
-  assert(load(read("plugin/beat_sync_follower.lua"), "=follower", "t", env))("gma3_beat_sync", "beat_sync_follower", sig)
-  local Main = assert(load(read("plugin/gma3_beat_sync.lua"), "=plugin", "t", env))("gma3_beat_sync", "gma3_beat_sync", sig)
-  c.Main, c.env, c.sig = Main, env, sig
+  -- The console runs the plugin's chunks at import and again on every show load (with the same _G).
+  function c.load_chunks()
+    local sig = {}
+    -- in the order of gma3_beat_sync.xml; the main component returns Main and Cleanup
+    c.Main = assert(load(read("plugin/gma3_beat_sync.lua"), "=plugin", "t", env))("gma3_beat_sync", "gma3_beat_sync", sig)
+    assert(load(read("plugin/beat_sync_protocol.lua"), "=protocol", "t", env))("gma3_beat_sync", "beat_sync_protocol", sig)
+    assert(load(read("plugin/beat_sync_follower.lua"), "=follower", "t", env))("gma3_beat_sync", "beat_sync_follower", sig)
+    c.sig = sig
+  end
+  c.env = env
+  c.load_chunks()
 
-  local co = coroutine.create(function() Main(nil, "") end)
+  local co = coroutine.create(function() c.Main(nil, opts_arg or "") end)
   c.co = co
+  function c.start(arg) -- a new invocation of Main as its own coroutine (CmdIndirect('Plugin ... "<arg>"'))
+    co = coroutine.create(function() c.Main(nil, arg or "") end)
+    c.co = co
+  end
   local frame_no = 0
   function c.run(seconds, on_frame)
     local n = math.floor(seconds * 1e6 / FRAME)
@@ -322,6 +333,42 @@ do
   check(c.printed[#c.printed]:find("unknown argument"), "unknown argument reported")
   c.Main(nil, "status")
   check(c.printed[#c.printed - 0]:find("gma3_beat_sync") ~= nil, "status printed")
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- Show load: the loop ends with the show and the plugin cannot restart itself (BS-02 record). The chunk, run again
+-- at the load, marks the shared status and the saved State as not running; starting it again works.
+
+do
+  local c = console({ Master = "3" })
+  c.run(2)
+  check(c.vars["BeatSync.State"] == "following", "following before the show load")
+  -- the show load: the running loop is gone (its coroutine is never resumed again), the chunks run again
+  c.load_chunks()
+  check(c.env.BeatSync.status.state == "not running", "the shared status is marked not running: "
+    .. tostring(c.env.BeatSync.status.state))
+  check(c.vars["BeatSync.State"] == "not running", "the saved State is marked not running: "
+    .. tostring(c.vars["BeatSync.State"]))
+  c.Main(nil, "status")
+  check(c.printed[#c.printed]:find("not running"), "status says not running")
+  check(#c.indirect == 0, "no command is queued from the chunk")
+  c.start("")
+  c.run(2)
+  check(c.vars["BeatSync.State"] == "following", "following again after a start")
+  check(#cmds_matching(c, "^Master 3%.3") == 2, "the tempo is written again after the start")
+  -- a stopped plugin stays "stopped" through a show load
+  c.Main(nil, "stop")
+  c.run(0.2)
+  c.load_chunks()
+  check(c.vars["BeatSync.State"] == "stopped", "a stopped plugin's State is kept")
+end
+
+-- A show without the plugin's variables: loading the chunk writes nothing
+do
+  local c = console({}, "status")
+  c.peer.present = false
+  c.load_chunks()
+  check(next(c.vars) == nil, "the chunk writes no variable in a show without them")
 end
 
 print(string.format("plugin_test: %d checks, %d failures", checks, failures))

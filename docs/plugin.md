@@ -38,6 +38,10 @@ Commands:
 
 The plugin runs beside other plugins (it was tested beside gma3-mcp's bridge). It does not depend on gma3-mcp.
 
+**After loading a show, start the plugin again.** A show load ends the plugin's loop, and the plugin cannot start
+itself again (BS-02 record). The plugin and its configuration are saved with the show; when the show is loaded,
+`BeatSync.State` reads `not running` until `Plugin "gma3_beat_sync"` is given again.
+
 ## Configuration
 
 Configuration is in console global variables named `BeatSync.<Key>`, so it is saved with the show. Set them from
@@ -74,11 +78,13 @@ rest of the configuration still works.
 
 The plugin writes its status four times a second into console global variables. Read them with
 `GetGlobalVariable "BeatSync.State"` on the command line, or `GetVar(GlobalVars(), "BeatSync.State")` in Lua.
-The values are text. An empty value reads back as no value (`nil` in Lua).
+The values are text. An empty value reads back as no value (`nil` in Lua). The variables are saved with the show,
+so a reader should also check `BeatSync.Updated`: a time more than 2 s old means the plugin is not running, whatever
+`BeatSync.State` says.
 
 | Variable | Meaning |
 | --- | --- |
-| `BeatSync.State` | `following`, `measuring` (peers seen, clock not yet measured), `no session`, `no session (configuration problems)`, `stopped` or `error` |
+| `BeatSync.State` | `following`, `measuring` (peers seen, clock not yet measured), `no session`, `no session (configuration problems)`, `stopped`, `not running` (after a show load or a re-import) or `error` |
 | `BeatSync.Peers` | Number of apps seen in sessions on the network |
 | `BeatSync.Session` | The followed session's id (16 hex digits) |
 | `BeatSync.Tempo` | Session tempo in BPM, three decimals |

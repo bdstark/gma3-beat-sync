@@ -109,8 +109,8 @@ Configuration and status are console global variables `BeatSync.<Key>` plus the 
 Live on onPC 2.5.1 against the test peer
 ([record](docs/probes/bs-02-follower-plugin-2026-10-16.md)): beat actions 23 ms after the beat as observed (about a
 frame of console latency; `LeadMs` 17 brings it to 8 ms), no drift over 5 minutes; BEATTIME-1, BEATTIME-2 and
-STARTSTOPSTATE-1 pass; leaving, rejoining and the ttl are handled. Open: the cases against Ableton Live, and a show
-load on the console.
+STARTSTOPSTATE-1 pass; leaving, rejoining and the ttl are handled. A show load ends the plugin's loop and the plugin
+cannot restart itself; it reports `not running` and is started again by hand. Open: the cases against Ableton Live.
 
 ## BS-03 — Full peer (only if BS-01 shows it is safe)
 

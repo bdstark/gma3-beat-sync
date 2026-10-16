@@ -14,6 +14,9 @@
 --   Plugin "gma3_beat_sync" "stop"     stop at the next frame
 --   Plugin "gma3_beat_sync" "status"   print the status to the command line history
 --
+-- A show load ends the plugin's loop, and the plugin cannot start itself again: start it after loading a show
+-- (BS-02 record). When the console runs this chunk again at the load, it marks the status as not running.
+--
 -- Configuration and status are console global variables named BeatSync.<Key>; see docs/plugin.md. Configuration
 -- is read when the plugin starts and every half second while it runs, so it can be changed with
 --   SetGlobalVariable "BeatSync.Master" "3"
@@ -368,7 +371,7 @@ end
 
 local function print_status()
   local s = shared.status
-  if not s then Printf("gma3_beat_sync %s: not started", VERSION) return end
+  if not s or not running then Printf("gma3_beat_sync %s: not running", VERSION) return end
   Printf("gma3_beat_sync %s: %s, %s peer(s), tempo %s, beat %s, playing %s", VERSION, tostring(s.state),
     tostring(s.peers), fmt(s.tempo, 2), fmt(s.beat, 2), tostring(s.playing))
   if s.problems and #s.problems > 0 then Printf("  problems: %s", table.concat(s.problems, "; ")) end
@@ -396,5 +399,15 @@ local function Main(_, argument)
 end
 
 local function Cleanup() end
+
+-- This chunk runs at import and again on every show load, and a show load ends a running loop. Neither a
+-- CmdIndirect nor a Timer issued here takes effect (BS-02 record), so the plugin cannot restart itself; it marks
+-- the shared status, and the State saved with the show, as not running.
+if type(signalTable) == "table" then
+  if shared.status and shared.status.state ~= "stopped" then shared.status.state = "not running" end
+  shared.control = nil
+  local ok_get, state = pcall(getvar, "State")
+  if ok_get and state and state ~= "stopped" and state ~= "not running" then pcall(setvar, "State", "not running") end
+end
 
 return Main, Cleanup

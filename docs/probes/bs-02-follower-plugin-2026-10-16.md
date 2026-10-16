@@ -19,6 +19,7 @@ and `test/lua/plugin_test.lua`. Raw output is in [bs-02/](bs-02/).
 | `beattime` (BEATTIME-1 and -2) | pass |
 | `startstop` (STARTSTOPSTATE-1) | pass, 3 runs out of 3 |
 | `leave` | pass: ByeBye seen in 429 ms; rejoined at the new session's 140 BPM and rewrote the master; a peer killed without a ByeBye was dropped after 5.0 s |
+| show load | the loop ends and must be started again; reported as `not running` (see [Show load](#show-load-with-the-maintainer-at-the-console)) |
 
 ### Timing
 
@@ -85,11 +86,29 @@ Each has an offline regression test that fails without the fix:
   - A variable set to an empty string reads back as `nil`.
   - "no", "off" and "false" stay strings.
 
+## Show load (with the maintainer at the console)
+
+The maintainer saved the throwaway show's state under a new name, `beat-sync-showload` (so the throwaway show's file
+was not touched), with the plugin imported at Plugin 2, configured (Master 12) and following a test peer. They then
+loaded it with `LoadShow "beat-sync-showload"` and restarted gma3-mcp's bridge.
+
+- **The plugin's loop ends at a show load.** Its last status update was the moment of the load (03:13:52Z); its
+  configuration and the variables saved with the show came back, so `BeatSync.State` still read `following`, stale.
+  Starting it with `Plugin "gma3_beat_sync"` worked at once: following again, one loop (no interleaved frames).
+- **The plugin cannot restart itself.** The console runs the plugin's chunks again at a show load (and at import),
+  and the chunk saw the loaded show's variables at import. But a `CmdIndirect('Plugin "gma3_beat_sync" "resume"')`
+  issued from the chunk never reached the plugin, and a `Timer()` started there was accepted but never called back
+  (checked at import, and the first for a show load too). gma3-mcp's bridge needs the same manual restart after a
+  show load.
+- **So the plugin reports it:** the chunk now marks the shared status, and a saved `BeatSync.State` other than
+  `stopped`, as `not running` (seen at import on the console; covered by `plugin_test.lua` for a show load). The
+  docs say to start the plugin after loading a show, and to treat a `BeatSync.Updated` older than 2 s as not
+  running.
+- Loading the throwaway show back from its file brought back the bridge version saved in it (0.30.0); the
+  bridge must be reinstalled after such a load.
+
 ## Not tested here
 
-- **A show load.** The plugin notices a new show file (`Root().ManetSocket.Showfile`), reports `show loaded: …`,
-  re-reads its configuration and rewrites the tempo; the offline test covers that. Whether its loop survives
-  `LoadShow`, and whether it must be started again, needs a show load on the console: an operator action.
 - **Ableton Live.** Not installed on this machine.
 - **A session on another machine or interface.**
 - **Whether writing status variables marks the show as changed** or adds undo steps.
