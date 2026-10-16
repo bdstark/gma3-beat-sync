@@ -131,3 +131,10 @@ error to any peer that measures the session through it. Build this only if BS-01
 - A Lua harness (stock Lua 5.5) for the message parser and the timeline arithmetic. It uses packets captured from
   the test peer, stored as fixtures.
 - Live tests on onPC: the plugin follows the test peer within a stated tolerance.
+
+**Status:** implemented in tools/test-peer (`gbs-test-peer`, `gbs-capture`, `gbs-vectors`),
+`plugin/beat_sync_protocol.lua`, `test/lua/protocol_test.lua` with captured and hand-made fixtures labelled by
+Link's own parser, and `test/live/follow_test_peer.mjs`. The live test runs the protocol module inside onPC (the
+plugin is BS-02) and follows the test peer within the stated tolerance of 1 ms phase error: 0.022 ms at most in
+three scenarios. Record: [docs/probes/bs-04-protocol-and-test-peer-2026-10-15.md](docs/probes/bs-04-protocol-and-test-peer-2026-10-15.md).
+BS-02 repeats the live test with the plugin.
