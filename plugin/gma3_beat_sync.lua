@@ -39,6 +39,9 @@ local CONFIG_EVERY = 30           -- frames between configuration reads (about 0
 local STATUS_EVERY = 15           -- frames between status writes (about 4 Hz)
 local FRAME_WINDOW = 120          -- frames kept for the frame statistics
 local MAX_ERRORS = 50             -- consecutive failing frames before the plugin stops
+local MASTER_READ_FRAMES = 60     -- peer mode: frames to retry reading the master's tempo at start (about 1 s)
+local MASTER_READ_REL = 2e-5      -- peer mode: a master read differing by less (relative) is not an operator's
+                                  -- change; reading 100 back from the fader gives 99.9998 (BS-03 live record)
 
 -- The shared table other plugins and Lua can read. It survives ReloadAllPlugins (_G is console-global).
 _G.BeatSync = _G.BeatSync or {}
@@ -173,12 +176,16 @@ local function master_bpm(m)
   local okf, f = pcall(function() return m:GetFader({}) end)
   if not okf or type(f) ~= "number" then return nil end
   local oks, scale = pcall(function() return m:Get("SpeedScale", Enums.Roles.Display) end)
-  scale = oks and tostring(scale) or "One"
-  local factor = 1
+  if not oks or scale == nil then return nil end
+  scale = tostring(scale)
+  local factor
   local n = tonumber(scale:match("^Mul(%d+)$"))
   local d = tonumber(scale:match("^Div(%d+)$"))
-  if n then factor = n elseif d then factor = 1 / d end
-  return 225 * (f / 100) ^ LOG2_375 * factor
+  if scale == "One" then factor = 1 elseif n and n > 0 then factor = n elseif d and d > 0 then factor = 1 / d end
+  if not factor then return nil end -- a scale this plugin does not know: the tempo is unknown, not "One"
+  local bpm = 225 * (f / 100) ^ LOG2_375 * factor
+  if bpm ~= bpm or bpm <= 0 or bpm == math.huge then return nil end
+  return bpm
 end
 
 ------------------------------------------------------------------------------------------------------------------
@@ -202,6 +209,11 @@ local function run()
 
   local config, problems = read_config()
   status.problems = problems
+  local start_problems = {} -- found when the plugin starts; kept when the configuration is read again
+  local function add_start_problem(text)
+    start_problems[#start_problems + 1] = text
+    status.problems[#status.problems + 1] = text
+  end
 
   -- Sockets: the session's multicast group, and one unicast socket for measurement pings.
   local mc, uc = socket.udp4(), socket.udp4()
@@ -247,7 +259,7 @@ local function run()
         senders[#senders + 1] = { address = a, sock = sd }
       else
         sd:close()
-        problems[#problems + 1] = "cannot send from " .. a
+        add_start_problem("cannot send from " .. a)
       end
     end
     peer = #senders > 0
@@ -258,8 +270,28 @@ local function run()
     for _, sd in ipairs(senders) do sd.sock:close() end
     senders = {}
   end
+  -- A peer founds its session at the speed master's tempo (TEMPO-5), so with a master configured its tempo must be
+  -- known first. A failing read (or a SpeedScale the plugin does not know) is tried again for about a second; if it
+  -- still fails, the plugin runs as a follower rather than found a session at a guessed tempo, announce it to the
+  -- other apps and write it to the master. Without a master, the session starts at 120 BPM (Link's default).
   local start_bpm = 120
-  if peer and config.master_handle then start_bpm = master_bpm(config.master_handle) or 120 end
+  if peer and config.master_handle then
+    running = true -- a second start while this waits is refused
+    local mb = master_bpm(config.master_handle)
+    for _ = 1, MASTER_READ_FRAMES do
+      if mb or control.stop then break end
+      coroutine.yield()
+      mb = master_bpm(config.master_handle)
+    end
+    if mb then
+      start_bpm = mb
+    else
+      add_start_problem("speed master " .. config.master .. " could not be read (fader or SpeedScale): running as "
+        .. "follow, not peer")
+      for _, sd in ipairs(senders) do sd.sock:close() end
+      senders, peer, node_id = {}, false, nil
+    end
+  end
   local follower = F.new(P, { quantum = config.quantum,
     peer = peer and { node_id = node_id, now_us = now_us(), bpm = start_bpm } or nil })
   status.mode = peer and "peer" or "follow"
@@ -357,7 +389,10 @@ local function run()
     local pos = follower:position(now)
     if not pos or now < tempo_retry_us then return end
     local w = tempo_written
-    if w and w.master == config.master and math.abs(pos.bpm - w.bpm) < config.threshold then return end
+    -- unchanged (written from this same tempo) never rewrites, whatever the threshold: with TempoThreshold 0 a
+    -- rewrite every frame would hold the settling window open and hide every operator change
+    local delta = w and math.abs(pos.bpm - w.bpm)
+    if w and w.master == config.master and (delta == 0 or delta < config.threshold) then return end
     if write_tempo(pos.bpm) then
       tempo_written = { master = config.master, bpm = pos.bpm }
       tempo_settle_us = now + 500000 -- the fader moves a frame or two later; ignore it until then
@@ -464,6 +499,7 @@ local function run()
         tempo_written = nil
       end
       config, status.problems = read_config()
+      for _, p in ipairs(start_problems) do status.problems[#status.problems + 1] = p end
       follower:set_quantum(config.quantum)
     end
 
@@ -517,7 +553,10 @@ local function run()
       if frames % 3 == 0 and config.master_handle and tempo_written and tempo_written.master == config.master
           and t0 >= tempo_settle_us then
         local mb = master_bpm(config.master_handle)
-        if mb and math.abs(mb - tempo_written.bpm) >= config.threshold then
+        -- an operator's change is at least the threshold and more than the fader's read-back error, so a threshold
+        -- of 0 cannot turn that error into a proposal every few frames
+        local min_change = math.max(config.threshold, tempo_written.bpm * MASTER_READ_REL)
+        if mb and math.abs(mb - tempo_written.bpm) >= min_change then
           tempo_moves = tempo_moves + 1
           if tempo_moves >= 2 and follower:propose_tempo(mb, t0) then
             local proposed = follower:position(t0)

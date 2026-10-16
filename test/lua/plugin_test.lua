@@ -44,16 +44,20 @@ local function console(vars, opts_arg)
     -- like the console: SpeedScale reads as an enum index; Get with the Display role gives its name
     c.masters[n] = { no = n, scale = "One", bpm = 60,
       -- the fader holds the base tempo (BPM = 225 * (fader / 100) ^ log2(3.75)); the scale multiplies it
+      -- fail_reads: that many reads raise first; read_error: the read is off by this fraction (the fader's resolution)
       GetFader = function(self)
+        if (self.fail_reads or 0) > 0 then self.fail_reads = self.fail_reads - 1 error("fader not readable") end
         local factor = ({ One = 1, Mul2 = 2, Mul4 = 4, Mul8 = 8 })[self.scale] or 1
-        return 100 * ((self.bpm / factor) / 225) ^ (1 / math.log(3.75, 2))
+        return 100 * ((self.bpm * (1 + (self.read_error or 0)) / factor) / 225) ^ (1 / math.log(3.75, 2))
       end,
       Set = function(self, k, v)
         assert(k == "SpeedScale")
         c.scale_sets = c.scale_sets + 1
         if not c.scale_locked then self.scale = v end -- a locked master ignores the write, as the console does
       end,
-      Get = function(self, k, role) assert(k == "SpeedScale" and role == "Display") return self.scale end }
+      Get = function(self, k, role) assert(k == "SpeedScale" and role == "Display")
+        if self.scale_unreadable then error("property not readable") end
+        return self.scale end }
     setmetatable(c.masters[n], { __index = function(self, k) if k == "SpeedScale" then
       return ({ One = 0, Mul2 = 1, Mul4 = 2, Mul8 = 3 })[self.scale] end end })
   end
@@ -640,6 +644,66 @@ do
   local d = console({ Mode = "bogus" })
   d.run(0.5)
   check((d.vars["BeatSync.Problems"] or ""):find("Mode must be follow or peer"), "a bad mode is a problem")
+end
+
+-- Review round 1 (PR #6), P1: a peer never founds a session at a guessed tempo when its master cannot be read
+do
+  -- the first read fails, a later one works: the session is founded at the master's real 100 BPM
+  local c = console({ Mode = "peer", Interfaces = "127.0.0.1", Master = "3" })
+  c.masters[3].bpm, c.masters[3].fail_reads = 100, 1
+  c.peer.present = false
+  c.run(2)
+  check(c.vars["BeatSync.ActiveMode"] == "peer" and c.vars["BeatSync.Tempo"] == "100.000",
+    "a failing first read is retried: founded at 100, " .. tostring(c.vars["BeatSync.Tempo"]))
+  check(math.abs(c.masters[3].bpm - 100) < 0.01, "and the master stays at 100: " .. c.masters[3].bpm)
+  local a = announced(c, P.ALIVE)
+  check(a[1] and math.abs(P.bpm(a[1].timeline.micros_per_beat) - 100) < 0.001, "the first announcement is at 100")
+  c.Main(nil, "stop") c.run(0.1)
+  -- never readable: it runs as a follower, says why, announces nothing and leaves the master alone
+  for _, case in ipairs({ { what = "a fader that cannot be read", set = function(m) m.fail_reads = 1e9 end },
+      { what = "a SpeedScale that cannot be read", set = function(m) m.scale_unreadable = true end },
+      { what = "a SpeedScale the plugin does not know", set = function(m) m.scale = "Weird" end } }) do
+    local d = console({ Mode = "peer", Interfaces = "127.0.0.1", Master = "3" })
+    d.masters[3].bpm = 100
+    case.set(d.masters[3])
+    d.peer.present = false
+    d.run(2)
+    check(d.vars["BeatSync.ActiveMode"] == "follow", case.what .. ": runs as follow")
+    check((d.vars["BeatSync.Problems"] or ""):find("speed master 3 could not be read", 1, true),
+      case.what .. ": reported, and kept after the configuration is read again: " .. tostring(d.vars["BeatSync.Problems"]))
+    check(#announced(d, P.ALIVE) == 0 and #cmds_matching(d, "^Master 3%.3") == 0, case.what .. ": nothing announced or written")
+    check(d.masters[3].bpm == 100, case.what .. ": the master is unchanged")
+    d.Main(nil, "stop") d.run(0.1)
+  end
+  -- without a master, the session starts at 120 as before
+  local e = console({ Mode = "peer", Interfaces = "127.0.0.1" })
+  e.peer.present = false
+  e.run(1)
+  check(e.vars["BeatSync.ActiveMode"] == "peer" and e.vars["BeatSync.Tempo"] == "120.000", "no master: founded at 120")
+  e.Main(nil, "stop") e.run(0.1)
+end
+
+-- Review round 1 (PR #6), P2: TempoThreshold 0 neither rewrites an unchanged tempo nor hides an operator's change
+do
+  local c = console({ Mode = "peer", Interfaces = "127.0.0.1", Master = "3", TempoThreshold = "0" })
+  c.masters[3].bpm = 100
+  c.masters[3].read_error = 1.7e-6 -- the fader reads 100 back as 99.9998 (BS-03 live record)
+  c.peer.present = false
+  c.run(2)
+  local writes = #cmds_matching(c, "^Master 3%.3")
+  c.run(2)
+  check(#cmds_matching(c, "^Master 3%.3") == writes, "threshold 0: an unchanged tempo is not rewritten ("
+    .. (#cmds_matching(c, "^Master 3%.3") - writes) .. " writes)")
+  check((c.env.BeatSync.status.counters.tempo_proposals or 0) == 0, "threshold 0: the fader's read-back error is not proposed")
+  c.masters[3].bpm = 130
+  c.run(1.5)
+  check(c.vars["BeatSync.Tempo"] == "130.000", "threshold 0: the operator's 130 reaches the session: "
+    .. tostring(c.vars["BeatSync.Tempo"]))
+  check(math.abs(c.masters[3].bpm - 130) < 0.01, "and is not overwritten with 100: " .. c.masters[3].bpm)
+  check(c.env.BeatSync.status.counters.tempo_proposals == 1, "proposed once: " .. tostring(c.env.BeatSync.status.counters.tempo_proposals))
+  c.run(2)
+  check(c.env.BeatSync.status.counters.tempo_proposals == 1, "no further proposals from the read-back error")
+  c.Main(nil, "stop") c.run(0.1)
 end
 
 print(string.format("plugin_test: %d checks, %d failures", checks, failures))

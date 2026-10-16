@@ -84,7 +84,7 @@ The plugin reads them when it starts and every half second. A missing variable t
 | `BeatSync.TempoThreshold` | `0.01` | The tempo change, in BPM, that rewrites the speed master. |
 | `BeatSync.LeadMs` | `0` | Run beat actions this many milliseconds early. The console shows the effect of a command about one frame (17 ms) after it runs; see [Timing](#timing). |
 | `BeatSync.Interfaces` | `127.0.0.1 0.0.0.0` | Addresses to listen for the session on. `0.0.0.0` is the default network interface; `127.0.0.1` hears apps on the same computer. Add the address of another network interface to hear sessions there. In peer mode the plugin announces itself from each address other than `0.0.0.0`, so give the console's own network address (for example `127.0.0.1 192.168.1.20`). Read when the plugin starts. |
-| `BeatSync.Mode` | `follow` | `follow`: listen only. `peer`: a full peer (see above); needs an address other than `0.0.0.0` in `Interfaces`. Read when the plugin starts. |
+| `BeatSync.Mode` | `follow` | `follow`: listen only. `peer`: a full peer (see above); needs an address other than `0.0.0.0` in `Interfaces`. With `Master` set, the master's tempo must be readable when the plugin starts (its fader, and a SpeedScale of One, MulN or DivN): it is tried for about a second, and if it cannot be read the plugin runs as `follow` and reports it, rather than found a session at a guessed tempo. Read when the plugin starts. |
 
 Commands are console command lines, as typed. Problems in the configuration (a speed master or sequence that does
 not exist, an action that is not `<N> <phase> <command>`, a bad quantum) are reported in `BeatSync.Problems`; the
@@ -145,7 +145,8 @@ session …", "show loaded: …"), `frame_periods_us` (the last 120 frame period
   the start's first beat action late, as soon as it knows (up to 100 ms late; later than that, it starts with the
   next beat).
 - **Peer mode.** An operator's change of the speed master is sent when it has held for two reads in a row (about
-  0.1 s), and not within 0.5 s of the plugin's own write. The session's tempo is clamped to 20–999 BPM. When the
+  0.1 s), and not within 0.5 s of the plugin's own write. It must be at least `TempoThreshold`, and more than the
+  fader's read-back error (2 parts in 100 000), so `TempoThreshold` `0` works too. The session's tempo is clamped to 20–999 BPM. When the
   console joins a session that is already playing it is not playing itself until an app in the session starts or
   stops again, as Link apps do (`link/Controller.hpp`, joinSession); with `StartStop` `off` the beat actions run
   anyway.
