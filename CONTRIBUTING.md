@@ -61,8 +61,8 @@ git clone --recurse-submodules https://github.com/bdstark/gma3-beat-sync.git
 git submodule update --init --recursive
 ```
 
-You need stock Lua 5.5 (the console's version) as `lua` and `luac`, CMake 3.16 or later and a C++ compiler. From
-the repository root:
+You need stock Lua 5.5 (the console's version) as `lua` and `luac`, CMake 3.16 or later, a C++ compiler and
+`python3` (one test parses the test peer's JSON output with it). From the repository root:
 
 ```sh
 scripts/check.sh

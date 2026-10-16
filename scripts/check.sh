@@ -6,7 +6,8 @@
 #   scripts/check.sh lua      Lua 5.5 syntax check of every .lua file
 #   scripts/check.sh spdx     every source file carries the SPDX licence identifier
 #   scripts/check.sh harness  the Lua harness (test/lua/*_test.lua) under stock Lua 5.5
-#   scripts/check.sh peer     build the test tools from the Link submodule (tools/test-peer, modules/link)
+#   scripts/check.sh peer     build the test tools from the Link submodule (tools/test-peer, modules/link) and
+#                             check the test peer's JSON lines (needs python3)
 #   scripts/check.sh fixtures every fixture's expect lines are what Link's parser reads (needs peer)
 #   scripts/check.sh vectors  test/fixtures/vectors.txt is what Link's arithmetic gives (needs peer)
 #   scripts/check.sh [all]    all of the above
@@ -77,6 +78,7 @@ check_peer() {
   cmake --build "$BUILD_DIR/tools" -j 4
   for t in gbs-test-peer gbs-capture gbs-vectors; do test -x "$BUILD_DIR/tools/bin/$t"; done
   echo "peer: built gbs-test-peer, gbs-capture, gbs-vectors from Link $(git -C modules/link describe --tags)"
+  tools/test-peer/json_lines_test.sh "$BUILD_DIR/tools/bin/gbs-test-peer"
 }
 
 check_fixtures() {

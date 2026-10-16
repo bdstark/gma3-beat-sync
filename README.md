@@ -52,8 +52,8 @@ GPL-2.0-or-later. See [LICENSE](LICENSE).
 
 ## Development
 
-Clone with the submodules, then run the checks (stock Lua 5.5 as `lua` and `luac`, CMake 3.16 or later and a C++
-compiler are needed):
+Clone with the submodules, then run the checks (stock Lua 5.5 as `lua` and `luac`, CMake 3.16 or later, a C++
+compiler and `python3` are needed):
 
 ```sh
 git clone --recurse-submodules https://github.com/bdstark/gma3-beat-sync.git

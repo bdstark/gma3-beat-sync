@@ -119,12 +119,42 @@ std::string sample(ableton::Link& link, double quantum, const char* ev)
   return buf;
 }
 
+// A JSON string literal: quotes, backslashes and control characters escaped (RFC 8259). Other bytes, UTF-8
+// included, pass through.
+std::string jsonString(const std::string& v)
+{
+  std::string out = "\"";
+  for (const unsigned char c : v)
+  {
+    switch (c)
+    {
+    case '"': out += "\\\""; break;
+    case '\\': out += "\\\\"; break;
+    case '\n': out += "\\n"; break;
+    case '\r': out += "\\r"; break;
+    case '\t': out += "\\t"; break;
+    case '\b': out += "\\b"; break;
+    case '\f': out += "\\f"; break;
+    default:
+      if (c < 0x20 || c == 0x7f)
+      {
+        char buf[8];
+        std::snprintf(buf, sizeof buf, "\\u%04x", c);
+        out += buf;
+      }
+      else
+        out += static_cast<char>(c);
+    }
+  }
+  return out + "\"";
+}
+
 std::string ack(const std::string& cmd, bool ok, const std::string& detail = "")
 {
   std::ostringstream s;
-  s << "{\"ev\":\"" << (ok ? "ack" : "error") << "\",\"cmd\":\"" << cmd << "\",\"wall_us\":" << wallMicros();
+  s << "{\"ev\":\"" << (ok ? "ack" : "error") << "\",\"cmd\":" << jsonString(cmd) << ",\"wall_us\":" << wallMicros();
   if (!detail.empty())
-    s << ",\"detail\":\"" << detail << "\"";
+    s << ",\"detail\":" << jsonString(detail);
   s << "}";
   return s.str();
 }

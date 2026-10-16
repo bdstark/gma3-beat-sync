@@ -10,7 +10,7 @@ scripts/check.sh            # everything below
 scripts/check.sh spdx       # every source file carries SPDX-License-Identifier: GPL-2.0-or-later
 scripts/check.sh lua        # every .lua file parses with Lua 5.5
 scripts/check.sh harness    # test/lua/*_test.lua
-scripts/check.sh peer       # builds tools/test-peer into build/tools/bin
+scripts/check.sh peer       # builds tools/test-peer into build/tools/bin, checks the test peer's JSON lines
 scripts/check.sh fixtures   # every fixture's expect lines are what Link's parser reads (needs peer)
 scripts/check.sh vectors    # test/fixtures/vectors.txt is what Link's arithmetic gives (needs peer)
 ```
@@ -32,6 +32,19 @@ It tests `plugin/beat_sync_protocol.lua` against Link's own code:
 4. **Measurement:** the data points of each captured pong agree within its round trip.
 5. **Robustness:** every truncation of every fixture packet, and 20 random byte changes of each, decode without
    raising.
+
+### The live chunk offline (`test/lua/follow_chunk_test.lua`)
+
+It runs `test/live/follow_chunk.lua` with mocked sockets and a simulated clock, one resume per frame, and checks
+that every resume yields within an instruction limit, that the time blocked per frame stays within the
+measurement's budget, and that the chunk ends and closes its sockets. Scenarios: discovery flooded with other
+packets, pongs that bring no data points, pongs of another ping or session, no replies, the normal path, and
+flooding while following.
+
+### The test peer's output (`tools/test-peer/json_lines_test.sh`)
+
+`scripts/check.sh peer` runs it after the build: commands with quotes, backslashes, control characters and UTF-8
+come back in valid JSON lines. It needs `python3` to parse them.
 
 ## Test tools (`tools/test-peer`)
 
