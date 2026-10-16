@@ -111,6 +111,11 @@ check_fixtures() {
     echo "  $LUA test/fixtures/make_variants.lua | $bin/gbs-capture --decode > test/fixtures/variants.txt" >&2
     exit 1
   fi
+  if ! "$LUA" test/fixtures/make_peer_messages.lua | "$bin/gbs-capture" --decode | diff -u test/fixtures/peer_messages.txt - >&2; then
+    echo "error: test/fixtures/peer_messages.txt is not the output of make_peer_messages.lua; regenerate it with:" >&2
+    echo "  $LUA test/fixtures/make_peer_messages.lua | $bin/gbs-capture --decode > test/fixtures/peer_messages.txt" >&2
+    exit 1
+  fi
   echo "fixtures: $count file(s) agree with Link's parser"
 }
 

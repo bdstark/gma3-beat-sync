@@ -64,6 +64,12 @@ local DEFAULTS = {
 }
 local ACTIONS = 16 -- BeatSync.Action1 .. BeatSync.Action16: "<every N beats> <phase> <command>"
 
+-- The status variables the plugin writes; none may share a name with the configuration (plugin_test checks).
+local STATUS_VARS = { "State", "Peers", "Session", "Tempo", "Beat", "Phase", "Playing", "LastAction", "DriftMsPerMin",
+  "FrameMs", "FrameJitterMs", "DroppedFrames", "MissedBeats", "Problems", "Error", "ActiveMode", "Node", "OwnSession",
+  "Version", "Updated" }
+shared.names = { config = DEFAULTS, status = STATUS_VARS, actions = ACTIONS }
+
 local function getvar(name)
   local v = (GetVar(GlobalVars(), PREFIX .. name)) -- GetVar of a missing variable returns no value (BS-01)
   if v == nil then return nil end
@@ -416,7 +422,7 @@ local function run()
     setvar("MissedBeats", tostring(s.counters.missed_beats or 0))
     setvar("Problems", table.concat(status.problems, "; "))
     setvar("Error", status.last_error or "")
-    setvar("Mode", status.mode)
+    setvar("ActiveMode", status.mode) -- not "Mode": that is the configuration, which this would overwrite
     setvar("Node", status.node or "")
     setvar("OwnSession", s.own_session == nil and "" or (s.own_session and "yes" or "no"))
     setvar("Version", VERSION)

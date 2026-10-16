@@ -177,8 +177,10 @@ function Follower:discovery(data, now_us)
     if m.session_id == self.current then self.timeline_changed = true end
   end
   s.seen_us = now_us
-  -- link/Controller.hpp, handleStartStopStateFromSession: a newer timestamp wins
-  if m.start_stop and (not s.start_stop or m.start_stop.timestamp > s.start_stop.timestamp) then
+  -- link/Controller.hpp, handleStartStopStateFromSession: a newer timestamp wins (and, for a peer that joined this
+  -- session, only a state newer than any it knew when it joined: see Follower:join)
+  if m.start_stop and (not s.start_stop or m.start_stop.timestamp > s.start_stop.timestamp)
+    and (not s.ss_floor or m.start_stop.timestamp > s.ss_floor) then
     s.start_stop = m.start_stop
   end
 
@@ -341,19 +343,33 @@ function Follower:finish_measurement(now_us, xform)
   end
 end
 
+-- Makes session id the current one. A peer does what link/Controller.hpp (joinSession) does on joining a different
+-- session: it resets its start/stop state ("Prevent passing the state of the previous session to the new one"). The
+-- members' existing state is then not taken over, as link/Peers.hpp passes on only a state no member had before, so
+-- a peer that joins a playing session is not playing until a member starts or stops again (STARTSTOPSTATE-2). The
+-- follower (not a Link app) keeps reporting the session's state as it is.
+function Follower:join(id)
+  if self.peer_mode and id ~= self.current then
+    local s = self.sessions[id]
+    s.ss_floor = s.start_stop and s.start_stop.timestamp or nil
+    s.start_stop = { playing = false, beats = 0, timestamp = 0 }
+  end
+  self.current = id
+end
+
 -- link/Sessions.hpp, handleSuccessfulMeasurement: switch to a newly measured session when its ghost time is ahead
 -- by more than 500 ms, or within 500 ms when its id is smaller.
 function Follower:choose_session(id, now_us)
   local P = self.P
   if not self.current or not self.sessions[self.current] or not self.sessions[self.current].xform then
-    self.current = id
+    self:join(id)
     return
   end
   if id == self.current then return end
   local cur = self.sessions[self.current].xform
   local new = self.sessions[id].xform
   local diff = P.host_to_ghost(new, now_us) - P.host_to_ghost(cur, now_us)
-  if diff > SESSION_EPS_US or (math.abs(diff) < SESSION_EPS_US and id < self.current) then self.current = id end
+  if diff > SESSION_EPS_US or (math.abs(diff) < SESSION_EPS_US and id < self.current) then self:join(id) end
 end
 
 ------------------------------------------------------------------------------------------------------------------
@@ -557,12 +573,14 @@ function Follower:status(now_us)
   local n_peers, n_sessions, failed = self.n_peers, self.n_sessions, 0
   for _, s in pairs(self.sessions) do if s.failed then failed = failed + 1 end end
   local pos = self:position(now_us)
+  local own_session = nil -- not "a and b or nil": that turns false into nil
+  if self.peer_mode and pos then own_session = self.current == self.node_id end
   return {
     state = pos and "following" or (n_peers > 0 and "measuring" or "no session"),
     peers = n_peers,
     sessions = n_sessions,
     failed_sessions = failed, -- announced sessions whose measurement failed and is being retried
-    own_session = self.peer_mode and self.current == self.node_id or nil, -- peer mode: in the session it founded
+    own_session = own_session, -- peer mode: true in the session it founded, false in another; nil when following
     session = pos and self.P.hex(pos.session_id) or nil,
     bpm = pos and pos.bpm or nil,
     beat = pos and pos.beat / 1e6 or nil,

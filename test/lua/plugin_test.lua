@@ -8,6 +8,7 @@
 -- Usage: lua test/lua/plugin_test.lua
 
 local root = (arg and arg[0] or ""):match("^(.*)test/lua/[^/]*$") or "./"
+local P = dofile(root .. "plugin/beat_sync_protocol.lua") -- to decode what the plugin sends
 
 local failures, checks = 0, 0
 local function check(ok, what)
@@ -32,7 +33,7 @@ local FRAME = 16667
 
 -- A fresh console: returns the console table and the plugin's Main.
 local function console(vars, opts_arg)
-  local c = { us = 1000000, cmds = {}, printed = {}, vars = {}, indirect = {}, mc_queue = {}, uc_queue = {}, sockets = {},
+  local c = { us = 1000000, cmds = {}, printed = {}, vars = {}, indirect = {}, sent = {}, mc_queue = {}, uc_queue = {}, sockets = {},
     peer = { node = "PEERNODE", mpb = 500000, offset = 7000000, playing = true, ss_beats = 0, ss_time = 1,
       present = true },
     sequences = { [1] = {}, [5] = {} }, show = "Show A", cmd_error = nil }
@@ -41,7 +42,12 @@ local function console(vars, opts_arg)
   c.scale_sets = 0
   for n = 1, 16 do
     -- like the console: SpeedScale reads as an enum index; Get with the Display role gives its name
-    c.masters[n] = { no = n, scale = "One",
+    c.masters[n] = { no = n, scale = "One", bpm = 60,
+      -- the fader holds the base tempo (BPM = 225 * (fader / 100) ^ log2(3.75)); the scale multiplies it
+      GetFader = function(self)
+        local factor = ({ One = 1, Mul2 = 2, Mul4 = 4, Mul8 = 8 })[self.scale] or 1
+        return 100 * ((self.bpm / factor) / 225) ^ (1 / math.log(3.75, 2))
+      end,
       Set = function(self, k, v)
         assert(k == "SpeedScale")
         c.scale_sets = c.scale_sets + 1
@@ -80,10 +86,11 @@ local function console(vars, opts_arg)
       if d then return d, "127.0.0.1", 50000 end
       return nil
     end
-    function s:sendto(data)
+    function s:sendto(data, ip, port)
       c.us = c.us + 2
-      -- the peer answers at once: session, its ghost time, then the ping's payload (link/PingResponder.hpp)
-      if c.peer.present and not c.peer.mute then
+      c.sent[#c.sent + 1] = { t = c.us, data = data, ip = ip, port = port, from = self.address }
+      -- a ping to the simulated peer: it answers at once (link/PingResponder.hpp: session, its ghost, the payload)
+      if data:sub(1, 9) == "_link_v\1\1" and c.peer.present and not c.peer.mute then
         c.uc_queue[#c.uc_queue + 1] = "_link_v\1\2" .. entry("sess", c.peer.node)
           .. entry("__gt", pack(">i8", c.us + 50 + c.peer.offset)) .. data:sub(10)
       end
@@ -111,7 +118,11 @@ local function console(vars, opts_arg)
     Cmd = function(cmd)
       if c.cmd_error then error(c.cmd_error) end
       c.cmds[#c.cmds + 1] = { t = c.us, cmd = cmd }
-      return c.cmd_answer and c.cmd_answer(cmd) or "OK"
+      local answer = c.cmd_answer and c.cmd_answer(cmd) or "OK"
+      local n, bpm = cmd:match("^Master 3%.(%d+) At BPM ([%d%.]+)$")
+      if n and answer == "OK" then c.masters[tonumber(n)].bpm = math.min(tonumber(bpm), 225 * (({ One = 1, Mul2 = 2,
+        Mul4 = 4, Mul8 = 8 })[c.masters[tonumber(n)].scale] or 1)) end
+      return answer
     end,
     Enums = { Roles = { Display = "Display" } },
     CmdIndirect = function(cmd) c.indirect[#c.indirect + 1] = cmd end,
@@ -510,6 +521,125 @@ do
   check(#cmds_matching(c, "^Go%+ Macro 4$") == 1 and #cmds_matching(c, "^Go%+ Macro 6$") == 1, "OnStart and OnStop ran")
   check(#cmds_matching(c, "^Go%+ Macro 5$") > before, "beat actions carry on after the stop")
   check(c.vars["BeatSync.Problems"] == "", "the default is not a configuration problem")
+end
+
+------------------------------------------------------------------------------------------------------------------
+-- Peer mode (BS-03)
+
+-- the console's own announcements since index i, decoded
+local function announced(c, mtype, from_i)
+  local r = {}
+  for i = from_i or 1, #c.sent do
+    local x = c.sent[i]
+    if x.data:sub(1, 8) == "_asdp_v\1" then
+      local m = P.decode_discovery(x.data)
+      if m and (not mtype or m.type == mtype) then m.to, m.port_to, m.t = x.ip, x.port, x.t r[#r + 1] = m end
+    end
+  end
+  return r
+end
+
+-- TEMPO-5: with no session to join, the console founds its own at the master's tempo and leaves the master alone
+do
+  local c = console({ Mode = "peer", Interfaces = "127.0.0.1", Master = "3" })
+  c.masters[3].bpm = 100
+  c.peer.present = false
+  c.run(2)
+  check(c.vars["BeatSync.ActiveMode"] == "peer" and c.vars["BeatSync.OwnSession"] == "yes", "peer mode, own session")
+  check(c.vars["BeatSync.Mode"] == "peer", "the configured Mode is left as it was")
+  check(c.vars["BeatSync.State"] == "following" and c.vars["BeatSync.Tempo"] == "100.000", "its session runs at 100: "
+    .. tostring(c.vars["BeatSync.Tempo"]))
+  check(math.abs(c.masters[3].bpm - 100) < 0.01, "TEMPO-5: the master stays at 100")
+  local a = announced(c, P.ALIVE)
+  check(#a >= 7 and #a <= 9, "an Alive every 250 ms (" .. #a .. " in 2 s)")
+  check(a[1].to == P.MULTICAST_ADDRESS and a[1].port_to == P.PORT, "sent to the group")
+  check(a[1].session_id == a[1].node_id and P.hex(a[1].node_id) == c.vars["BeatSync.Node"], "its own session, its node id")
+  check(a[1].mep4.address == "127.0.0.1" and a[1].mep4.port == 54000, "its measurement endpoint")
+  check(math.abs(P.bpm(a[1].timeline.micros_per_beat) - 100) < 0.001, "announced at 100")
+end
+
+-- TEMPO-2: an existing session ahead of the console's keeps its tempo; the console joins it and the master follows
+do
+  local c = console({ Mode = "peer", Interfaces = "127.0.0.1", Master = "3" })
+  c.masters[3].bpm = 100
+  c.run(3)
+  check(c.vars["BeatSync.OwnSession"] == "no" and c.vars["BeatSync.Tempo"] == "120.000", "joined the peer's 120 session: "
+    .. tostring(c.vars["BeatSync.OwnSession"]) .. " " .. tostring(c.vars["BeatSync.Tempo"]))
+  check(math.abs(c.masters[3].bpm - 120) < 0.01, "the master follows to 120")
+  local a = announced(c, P.ALIVE)
+  check(P.hex(a[#a].session_id) == P.hex(c.peer.node), "it announces membership of the peer's session")
+  -- discovery/UdpMessenger.hpp: each Alive from the peer is answered with a unicast Response
+  local r = announced(c, P.RESPONSE)
+  check(#r >= 5 and r[1].to == "127.0.0.1" and r[1].port_to == 50000, "Responses to the peer's Alives (" .. #r .. ")")
+
+  -- a peer measuring the session through the console: its ping is answered with a pong of the session
+  local n0 = #c.sent
+  c.uc_queue[#c.uc_queue + 1] = P.encode_ping(424242)
+  c.run(0.1)
+  local pong
+  for i = n0 + 1, #c.sent do
+    local m = P.decode_measurement(c.sent[i].data)
+    if m and m.type == P.PONG and m.host == 424242 then pong = m end
+  end
+  check(pong and P.hex(pong.session_id) == P.hex(c.peer.node), "a ping from a peer is answered with the session's pong")
+
+  -- TEMPO-1: the operator moves the master to 130; the console proposes it, and does not write it back
+  local writes = #cmds_matching(c, "^Master 3%.3")
+  c.masters[3].bpm = 130
+  local i0 = #c.sent
+  c.run(1.5)
+  local a2 = announced(c, P.ALIVE, i0)
+  check(a2[#a2] and math.abs(P.bpm(a2[#a2].timeline.micros_per_beat) - 130) < 0.001, "the session is announced at 130")
+  check(c.vars["BeatSync.Tempo"] == "130.000", "the session tempo is 130: " .. tostring(c.vars["BeatSync.Tempo"]))
+  check(#cmds_matching(c, "^Master 3%.3") == writes, "the master is not written back")
+
+  -- play and pause from the console (STARTSTOPSTATE-2)
+  c.Main(nil, "play")
+  local i1 = #c.sent
+  c.run(0.5)
+  local a3 = announced(c, P.ALIVE, i1)
+  check(a3[1] and a3[1].start_stop.playing and a3[1].start_stop.beats % 4000000 == 0, "play: announced, on a bar")
+  c.Main(nil, "pause")
+  local i2 = #c.sent
+  c.run(0.5)
+  local a4 = announced(c, P.ALIVE, i2)
+  check(a4[1] and not a4[1].start_stop.playing and a4[1].start_stop.timestamp > a3[1].start_stop.timestamp,
+    "pause: a newer stop announced")
+  -- an announcement after a change goes out at once (within 50 ms), not at the next 250 ms tick
+  -- at once: within Link's 50 ms minimum gap between announcements and a frame, not at the next 250 ms tick
+  check(a3[1].t - c.sent[i1].t < 90000, "the change is announced at once: " .. (a3[1].t - c.sent[i1].t))
+
+  -- leaving: ByeBye
+  c.Main(nil, "stop")
+  c.run(0.1)
+  check(#announced(c, P.BYEBYE) >= 1, "ByeBye on stop")
+end
+
+-- Peer mode needs an address to announce; play needs peer mode
+do
+  local c = console({ Mode = "peer", Interfaces = "0.0.0.0" })
+  c.run(1)
+  check((c.vars["BeatSync.Problems"] or ""):find("Mode peer needs an interface address"), "no address: a problem: "
+    .. tostring(c.vars["BeatSync.Problems"]))
+  check(c.vars["BeatSync.ActiveMode"] == "follow" and #announced(c) == 0, "and it only follows")
+  check(c.vars["BeatSync.Mode"] == "peer", "the configured Mode stays peer")
+  -- no status variable may share a name with the configuration (the plugin would overwrite its own settings)
+  local names = c.env.BeatSync.names
+  for _, n in ipairs(names.status) do
+    check(names.config[n] == nil and not n:match("^Action%d+$"), "status variable " .. n .. " is not a setting")
+  end
+  -- every status variable the plugin wrote is in the list
+  local listed = {}
+  for _, n in ipairs(names.status) do listed["BeatSync." .. n] = true end
+  for k in pairs(c.vars) do
+    local n = k:match("^BeatSync%.(.+)$")
+    if n and names.config[n] == nil and not n:match("^Action%d+$") then check(listed[k], k .. " is a listed status variable") end
+  end
+  c.Main(nil, "play")
+  check(c.printed[#c.printed]:find('needs BeatSync.Mode "peer"'), "play is refused in follow mode")
+  local d = console({ Mode = "bogus" })
+  d.run(0.5)
+  check((d.vars["BeatSync.Problems"] or ""):find("Mode must be follow or peer"), "a bad mode is a problem")
 end
 
 print(string.format("plugin_test: %d checks, %d failures", checks, failures))
