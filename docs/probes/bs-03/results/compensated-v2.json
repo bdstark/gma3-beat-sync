@@ -1,0 +1,96 @@
+{
+  "runs": [
+    {
+      "console": {
+        "node": "09f025cede77dcb8",
+        "start": 1792149244319900,
+        "finish": 1792149248821300,
+        "frames": 269,
+        "peers": "4529467954583262@09f025cede77dcb8",
+        "answered": 52,
+        "alive_sent": 18,
+        "mep_port": "56632",
+        "joined_at": 1792149245153400,
+        "pings": 52
+      },
+      "joined": true,
+      "joinedAfterMs": 817,
+      "judgedSamples": 603,
+      "errorMs": {
+        "mean": -0.132,
+        "min": -0.408,
+        "median": -0.131,
+        "max": -0.126
+      }
+    },
+    {
+      "console": {
+        "node": "0a5de39f9989431e",
+        "start": 1792149251787400,
+        "finish": 1792149256290800,
+        "frames": 268,
+        "peers": "716d7c7d603d796b@0a5de39f9989431e",
+        "answered": 52,
+        "alive_sent": 18,
+        "mep_port": "63450",
+        "joined_at": 1792149252434100,
+        "pings": 52
+      },
+      "joined": true,
+      "joinedAfterMs": 598,
+      "judgedSamples": 642,
+      "errorMs": {
+        "mean": -0.091,
+        "min": -0.147,
+        "median": -0.091,
+        "max": -0.085
+      }
+    },
+    {
+      "console": {
+        "node": "2e8b46acc56acdb2",
+        "start": 1792149259276200,
+        "finish": 1792149263792000,
+        "frames": 268,
+        "peers": "705b50272c3e2333@2e8b46acc56acdb2",
+        "answered": 52,
+        "alive_sent": 18,
+        "mep_port": "58810",
+        "joined_at": 1792149260140000,
+        "pings": 52
+      },
+      "joined": true,
+      "joinedAfterMs": 847,
+      "judgedSamples": 608,
+      "errorMs": {
+        "mean": -0.156,
+        "min": -0.161,
+        "median": -0.156,
+        "max": -0.15
+      }
+    },
+    {
+      "console": {
+        "node": "2b1e54ec80e1f51c",
+        "start": 1792149266759000,
+        "finish": 1792149271271300,
+        "frames": 264,
+        "peers": "3f3d302d72414e2d@2b1e54ec80e1f51c",
+        "answered": 52,
+        "alive_sent": 18,
+        "mep_port": "52658",
+        "joined_at": 1792149267621800,
+        "pings": 52
+      },
+      "joined": true,
+      "joinedAfterMs": 813,
+      "judgedSamples": 568,
+      "errorMs": {
+        "mean": -0.142,
+        "min": -0.173,
+        "median": -0.142,
+        "max": -0.137
+      }
+    }
+  ]
+}
