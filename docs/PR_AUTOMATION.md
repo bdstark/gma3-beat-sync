@@ -24,7 +24,7 @@ until the children are rebased and checked; dispatch the merged parent PR number
 Set `PR_MERGE_ENABLED=false` to stop mutation jobs or `PR_AUTOMATION_ENABLED=false` to stop the entire service.
 
 Full policy, limitations and controller tests are maintained at the exact revision pinned in the workflow:
-https://github.com/bdstark/gma3-mcp/blob/86cf3d56007db1e06e431c2dc062752a2c84f961/docs/PR_AUTOMATION.md
+https://github.com/bdstark/gma3-mcp/blob/fe11d8848fc2cf0cb433417b2ff70f4502ec92a0/docs/PR_AUTOMATION.md
 
 After resolving the last discussion, bdstark can post `/accept` to reevaluate all gates without repeating a completed independent review.
 
@@ -32,4 +32,6 @@ Merges and cleanup serialize repository-wide. Deletion uses an atomic Git SHA le
 
 ## Protected API key
 
-Add `OPENAI_API_KEY` under Settings → Environments → **codex-review** → Environment secrets. This environment permits only the **main branch** (custom branch policy, no tag rules), rejecting PR merge refs and feature branches. The independent job receives this environment secret directly; callers do not forward a repository secret. Remove the repository-level OPENAI_API_KEY copy: repository secrets remain available to PR-authored same-repository workflows regardless of the intended listener permissions. Do not enable reviews until the environment secret is populated. Missing credentials fail closed. Workflow/policy changes require review before reaching main.
+Add `OPENAI_API_KEY` under Settings → Environments → **codex-review** → Environment secrets. This environment permits only the **main branch** (custom branch policy, no tag rules), rejecting PR merge refs and feature branches. The independent job receives this environment secret directly; callers explicitly forward the secret name through each reusable-workflow boundary; the main-only environment supplies its value. Remove the repository-level OPENAI_API_KEY copy: repository secrets remain available to PR-authored same-repository workflows regardless of the intended listener permissions. Do not enable reviews until the environment secret is populated. Missing credentials fail closed. Workflow/policy changes require review before reaching main.
+
+GitHub requires explicit named-secret forwarding at every reusable-workflow boundary even for environment-only secrets. This does not restore a repository secret; codex-review remains the only key store.
