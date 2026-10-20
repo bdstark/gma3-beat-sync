@@ -24,6 +24,8 @@ until the children are rebased and checked; dispatch the merged parent PR number
 Set `PR_MERGE_ENABLED=false` to stop mutation jobs or `PR_AUTOMATION_ENABLED=false` to stop the entire service.
 
 Full policy, limitations and controller tests are maintained at the exact revision pinned in the workflow:
-https://github.com/bdstark/gma3-mcp/blob/6453563f75f087dc13cb294f32e737687e0b26fa/docs/PR_AUTOMATION.md
+https://github.com/bdstark/gma3-mcp/blob/0fab4ca68f8982e941662f5634a805bb931c5266/docs/PR_AUTOMATION.md
 
 After resolving the last discussion, bdstark can post `/accept` to reevaluate all gates without repeating a completed independent review.
+
+Merges and cleanup serialize repository-wide. Deletion uses an atomic Git SHA lease. An explicit workflow dispatch rescans other PRs after a GITHUB_TOKEN merge; stale-base CI still requires a rebase before acceptance.
