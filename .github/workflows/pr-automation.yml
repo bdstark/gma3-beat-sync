@@ -6,8 +6,6 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, closed]
   pull_request_review:
     types: [submitted]
-  pull_request_review_thread:
-    types: [resolved, unresolved]
   issue_comment:
     types: [created, edited]
   workflow_run:
@@ -29,6 +27,6 @@ permissions:
   checks: read
 jobs:
   review-and-accept:
-    uses: bdstark/gma3-mcp/.github/workflows/pr-review-service.yml@af3a23bf910f7b946cf4f27e33d3dd3f5c8ebf2d
+    uses: bdstark/gma3-mcp/.github/workflows/pr-review-service.yml@6453563f75f087dc13cb294f32e737687e0b26fa
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -24,4 +24,6 @@ until the children are rebased and checked; dispatch the merged parent PR number
 Set `PR_MERGE_ENABLED=false` to stop mutation jobs or `PR_AUTOMATION_ENABLED=false` to stop the entire service.
 
 Full policy, limitations and controller tests are maintained at the exact revision pinned in the workflow:
-https://github.com/bdstark/gma3-mcp/blob/af3a23bf910f7b946cf4f27e33d3dd3f5c8ebf2d/docs/PR_AUTOMATION.md
+https://github.com/bdstark/gma3-mcp/blob/6453563f75f087dc13cb294f32e737687e0b26fa/docs/PR_AUTOMATION.md
+
+After resolving the last discussion, bdstark can post `/accept` to reevaluate all gates without repeating a completed independent review.
