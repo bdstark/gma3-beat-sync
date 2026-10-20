@@ -26,6 +26,6 @@ permissions:
   statuses: read
 jobs:
   review-and-accept:
-    uses: bdstark/gma3-mcp/.github/workflows/pr-review-service.yml@93c7f0283b392be0ed0a4a9988f44a67d312eaec
+    uses: bdstark/gma3-mcp/.github/workflows/pr-review-service.yml@2dd884b4e61399537591b82f803b8d7abde82e06
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
