@@ -24,8 +24,12 @@ until the children are rebased and checked; dispatch the merged parent PR number
 Set `PR_MERGE_ENABLED=false` to stop mutation jobs or `PR_AUTOMATION_ENABLED=false` to stop the entire service.
 
 Full policy, limitations and controller tests are maintained at the exact revision pinned in the workflow:
-https://github.com/bdstark/gma3-mcp/blob/c708e1d91e84edc1de94562ab4e4c12943169980/docs/PR_AUTOMATION.md
+https://github.com/bdstark/gma3-mcp/blob/86cf3d56007db1e06e431c2dc062752a2c84f961/docs/PR_AUTOMATION.md
 
 After resolving the last discussion, bdstark can post `/accept` to reevaluate all gates without repeating a completed independent review.
 
 Merges and cleanup serialize repository-wide. Deletion uses an atomic Git SHA lease. An explicit workflow dispatch rescans other PRs after a GITHUB_TOKEN merge; stale-base CI still requires a rebase before acceptance.
+
+## Protected API key
+
+Add `OPENAI_API_KEY` under Settings → Environments → **codex-review** → Environment secrets. This environment permits only the **main branch** (custom branch policy, no tag rules), rejecting PR merge refs and feature branches. The independent job receives this environment secret directly; callers do not forward a repository secret. Remove the repository-level OPENAI_API_KEY copy: repository secrets remain available to PR-authored same-repository workflows regardless of the intended listener permissions. Do not enable reviews until the environment secret is populated. Missing credentials fail closed. Workflow/policy changes require review before reaching main.
