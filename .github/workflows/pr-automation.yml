@@ -3,9 +3,7 @@
 name: PR automation
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, closed]
-  pull_request_review:
-    types: [submitted]
+    types: [opened, synchronize, reopened, ready_for_review, edited, closed]
   issue_comment:
     types: [created, edited]
   workflow_run:
@@ -27,6 +25,6 @@ permissions:
   checks: read
 jobs:
   review-and-accept:
-    uses: bdstark/gma3-mcp/.github/workflows/pr-review-service.yml@856dfc7be4196ba11229a8da98dcd8b80ffb31d9
+    uses: bdstark/gma3-mcp/.github/workflows/pr-review-service.yml@b385ffee55d04a93d751d8ca9f8b3f3993d2f60a
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
