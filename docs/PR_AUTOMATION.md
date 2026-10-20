@@ -24,7 +24,7 @@ until the children are rebased and checked; dispatch the merged parent PR number
 Set `PR_MERGE_ENABLED=false` to stop mutation jobs or `PR_AUTOMATION_ENABLED=false` to stop the entire service.
 
 Full policy, limitations and controller tests are maintained at the exact revision pinned in the workflow:
-https://github.com/bdstark/gma3-mcp/blob/93c7f0283b392be0ed0a4a9988f44a67d312eaec/docs/PR_AUTOMATION.md
+https://github.com/bdstark/gma3-mcp/blob/2dd884b4e61399537591b82f803b8d7abde82e06/docs/PR_AUTOMATION.md
 
 After resolving the last discussion, bdstark can post `/accept` to reevaluate all gates without repeating a completed independent review.
 
@@ -35,3 +35,5 @@ Merges and cleanup serialize repository-wide. Deletion uses an atomic Git SHA le
 Add `OPENAI_API_KEY` under Settings → Environments → **codex-review** → Environment secrets. This environment permits only the **main branch** (custom branch policy, no tag rules), rejecting PR merge refs and feature branches. The independent job receives this environment secret directly; callers explicitly forward the secret name through each reusable-workflow boundary; the main-only environment supplies its value. Remove the repository-level OPENAI_API_KEY copy: repository secrets remain available to PR-authored same-repository workflows regardless of the intended listener permissions. Do not enable reviews until the environment secret is populated. Missing credentials fail closed. Workflow/policy changes require review before reaching main.
 
 GitHub requires explicit named-secret forwarding at every reusable-workflow boundary even for environment-only secrets. This does not restore a repository secret; codex-review remains the only key store.
+
+Independent reviews are reused for the exact PR head/base across automatic and manual triggers. A queued job rechecks evidence after acquiring its per-PR lock, before spending API tokens. New head or base revisions require a fresh review.
