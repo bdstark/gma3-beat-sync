@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 //! The bridge's side of LB1, sans-IO: what to answer and which timeline to publish, for a datagram that arrived at a
-//! given time on the Link clock. Rules 1, 2, 6 and 7 of "What the bridge does" in gma3-phrase-sync's
-//! `docs/link-bridge.md`; [`crate::publish`] has the rest.
+//! given time on the Link clock. Rules 1, 2, 6 and 7 of "What the bridge does" in the protocol's
+//! specification (`docs/link-bridge.md` in the link-bridge-protocol repository); [`crate::publish`] has the rest.
 
 use link_bridge_protocol::{DecodeError, Message, PROTOCOL, State, Timeline};
 

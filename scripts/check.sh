@@ -12,7 +12,7 @@
 #   scripts/check.sh fixtures every fixture's expect lines are what Link's parser reads (needs peer)
 #   scripts/check.sh vectors  test/fixtures/vectors.txt is what Link's arithmetic gives (needs peer)
 #   scripts/check.sh bridge   the Link bridge in bridge/: cargo fmt --check, clippy -D warnings and cargo test (needs
-#                             Rust, CMake, the submodule and SSH access to gma3-phrase-sync; not part of all)
+#                             Rust, CMake and the submodule; not part of all)
 #   scripts/check.sh [all]    all of the above but bridge
 set -eu
 

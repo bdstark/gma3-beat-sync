@@ -31,9 +31,10 @@ its beat, and the console shows its effect about a frame later (`BeatSync.LeadMs
 ## The bridge for gma3-phrase-sync (`bridge/`)
 
 A second, separate program in this repository: `link-bridge` publishes the tempo and bar phase of
-[gma3-phrase-sync](https://github.com/bdstark/gma3-phrase-sync) (which follows Pioneer CDJs) to a Link session. The
+gma3-phrase-sync (which follows Pioneer CDJs) to a Link session. The
 service stays MIT-licensed and contains no Link code; it sends its timeline over loopback UDP in a small protocol,
-LB1, specified in gma3-phrase-sync's `docs/link-bridge.md`. The bridge is written in Rust, uses Ableton's Link library
+LB1, specified in [`docs/link-bridge.md`](https://github.com/bdstark/link-bridge-protocol/blob/734d8454861d3fa6e5513d8692a48c345d179d1c/docs/link-bridge.md) of the MIT crate
+[link-bridge-protocol](https://github.com/bdstark/link-bridge-protocol). The bridge is written in Rust, uses Ableton's Link library
 from `modules/link` through its C wrapper (`abl_link`), and shares no code with the console plugin.
 
 ```sh
@@ -53,8 +54,8 @@ Then set `[sink.link] bridge = "127.0.0.1:7822"` in gma3-phrase-sync's configura
   they are, and stays in the session;
 - answers a sender speaking another protocol revision with its own (`VERSION`), at most once a second.
 
-It needs Rust 1.99 or later, CMake 3.16 or later and a C++ compiler. The protocol's messages come from the MIT
-crate `link-bridge-protocol` in gma3-phrase-sync, which Cargo fetches over SSH from that (private) repository.
+It needs Rust 1.99 or later, CMake 3.16 or later and a C++ compiler. The protocol's messages come from the
+`link-bridge-protocol` crate, which Cargo fetches from its repository at a pinned revision.
 Tests: `scripts/check.sh bridge` ([docs/testing.md](docs/testing.md#the-bridge-bridge)). The work is ticket BS-05 in
 [TICKETS.md](TICKETS.md).
 
@@ -73,7 +74,7 @@ GPL-2.0-or-later. See [LICENSE](LICENSE).
 - **The Link library:** used to build a test peer for this repository's tests, and linked into the bridge
   (`bridge/`). It is included as a git submodule under its own license (GPL version 2 or later), with its own
   third-party dependencies. Nothing from it is shipped in the plugin.
-- **The bridge's dependencies:** `link-bridge-protocol` (MIT, from gma3-phrase-sync), `ctrlc` (MIT or Apache-2.0)
+- **The bridge's dependencies:** [`link-bridge-protocol`](https://github.com/bdstark/link-bridge-protocol) (MIT), `ctrlc` (MIT or Apache-2.0)
   and, to build, `cmake` (MIT or Apache-2.0), with their own dependencies listed in `Cargo.lock`.
 
 ### Third-party code in `modules/`
@@ -98,7 +99,7 @@ scripts/check.sh
 `scripts/check.sh` checks the SPDX headers, parses every Lua file with Lua 5.5, runs the Lua harness, builds the
 test tools from `modules/link` and checks the fixtures against Link's own parser and arithmetic. CI runs the same
 steps. `scripts/check.sh bridge` checks the bridge (`cargo fmt`, `clippy` and its tests); it is separate from the
-others because it needs Rust and access to gma3-phrase-sync. [docs/testing.md](docs/testing.md) describes the
+others because it needs Rust. [docs/testing.md](docs/testing.md) describes the
 harness, the test peer, the bridge's tests and the live tests on onPC.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [ACCESSIBILITY.md](ACCESSIBILITY.md) and the

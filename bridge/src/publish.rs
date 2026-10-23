@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-//! What a timeline does to the Link session (rules 3 to 5 of "What the bridge does" in gma3-phrase-sync's
-//! `docs/link-bridge.md`), on any [`SessionState`]: the library's ([`crate::link::Session`]) or a fake in the tests.
+//! What a timeline does to the Link session (rules 3 to 5 of "What the bridge does" in the protocol's
+//! specification, `docs/link-bridge.md` in the link-bridge-protocol repository), on any [`SessionState`]: the library's ([`crate::link::Session`]) or a fake in the tests.
 
 use link_bridge_protocol::{State, Timeline};
 

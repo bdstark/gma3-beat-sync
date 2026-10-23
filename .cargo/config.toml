@@ -1,5 +1,0 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
-# The bridge depends on link-bridge-protocol in gma3-phrase-sync over SSH; the git command line uses the SSH agent
-# and keys the way `git clone` does.
-[net]
-git-fetch-with-cli = true

@@ -175,8 +175,8 @@ service is MIT-licensed and keeps Link code out (decided 2026-10-23); it sends i
 protocol LB1 to a separate GPL program built on Ableton's Link library. The bridge lives here because this
 repository is already GPL-2.0-or-later and has the library as a submodule. It shares no code with the plugin.
 
-**Depends on:** BS-00 (the submodule); gma3-phrase-sync PS-11b (the protocol, `docs/link-bridge.md`, and the MIT
-crate `link-bridge-protocol`, merged as 82eb52d).
+**Depends on:** BS-00 (the submodule); the protocol, LB1: its specification and the MIT crate that encodes it, in
+[link-bridge-protocol](https://github.com/bdstark/link-bridge-protocol) (from gma3-phrase-sync PS-11b), pinned at 734d845.
 
 ### Acceptance criteria
 

@@ -11,8 +11,8 @@ publish.workspace = true
 build = "build.rs"
 
 [dependencies]
-# The messages, from gma3-phrase-sync (MIT): docs/link-bridge.md there is the contract.
-link-bridge-protocol = { git = "ssh://git@github.com/bdstark/gma3-phrase-sync.git", rev = "82eb52d95caab2a168eff1585bf27a928030a535" }
+# The messages (MIT): docs/link-bridge.md in that repository is the contract.
+link-bridge-protocol = { git = "https://github.com/bdstark/link-bridge-protocol.git", rev = "734d8454861d3fa6e5513d8692a48c345d179d1c" }
 ctrlc = "3"
 
 [build-dependencies]
