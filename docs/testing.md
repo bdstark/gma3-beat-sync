@@ -13,9 +13,32 @@ scripts/check.sh harness    # test/lua/*_test.lua
 scripts/check.sh peer       # builds tools/test-peer into build/tools/bin, checks the test peer's JSON lines
 scripts/check.sh fixtures   # every fixture's expect lines are what Link's parser reads (needs peer)
 scripts/check.sh vectors    # test/fixtures/vectors.txt is what Link's arithmetic gives (needs peer)
+scripts/check.sh bridge     # the bridge: cargo fmt --check, clippy -D warnings, cargo test (not part of "everything")
 ```
 
 CI runs the same steps on Ubuntu with Lua 5.5.1 built from lua.org.
+
+### The bridge (`bridge/`)
+
+`cargo test -p link-bridge` runs, without joining the network's Link session:
+- `src/bridge.rs`: the protocol state on a fake clock (pongs, ordering per run, a new run, `BYE`, the 3 s silence,
+  `VERSION` and its limits, malformed datagrams);
+- `src/publish.rs`: what a timeline does to a fake session (tempo, bar phase, a jump by whole bars, the tolerances,
+  quantum 0, `stop`, start/stop sharing);
+- `tests/loopback.rs`: the bridge on a loopback socket with a real Link instance that is not enabled. Every Link
+  instance in a process reads the same clock, so the offset a sender measures from 16 pings must be 0; it is checked
+  to be under 1 ms. A `play` timeline sets the instance's tempo and phase, a jump by whole bars leaves the phase.
+
+`tests/link_session.rs` is ignored by default because it **joins the Link session on the network** and moves its
+tempo and phase: every Link app on the network follows it. Run it only when nothing else is in the session:
+
+```sh
+cargo test -p link-bridge --test link_session -- --ignored --nocapture
+```
+
+It starts the bridge with Link enabled and a second Link peer in the same process, checks that the bridge counts the
+peer in its pongs and that the offset is under 1 ms, sends `play` timelines, and waits until the second peer has the
+tempo (within 0.001 BPM) and the bar phase (within 1 ms), then checks that a jump by whole bars leaves it.
 
 ### The harness (`test/lua/protocol_test.lua`)
 

@@ -57,3 +57,38 @@ jobs:
         run: scripts/check.sh fixtures
       - name: Vectors agree with Link's arithmetic
         run: scripts/check.sh vectors
+
+  bridge:
+    name: Link bridge (Rust) on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      # The bridge depends on link-bridge-protocol in the private gma3-phrase-sync repository. Without a deploy key
+      # for it (a read-only key, stored as this secret), the job says so and skips the build.
+      HAS_PROTOCOL_KEY: ${{ secrets.PHRASE_SYNC_DEPLOY_KEY != '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: No access to gma3-phrase-sync
+        if: env.HAS_PROTOCOL_KEY != 'true'
+        run: echo "::warning::PHRASE_SYNC_DEPLOY_KEY is not set; the bridge is not built"
+      - uses: webfactory/ssh-agent@v0.9.1
+        if: env.HAS_PROTOCOL_KEY == 'true'
+        with:
+          ssh-private-key: ${{ secrets.PHRASE_SYNC_DEPLOY_KEY }}
+      - name: Rust toolchain
+        if: env.HAS_PROTOCOL_KEY == 'true'
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+      - name: fmt, clippy and tests (the Link session test is ignored)
+        if: env.HAS_PROTOCOL_KEY == 'true'
+        run: scripts/check.sh bridge

@@ -167,3 +167,37 @@ Link's own parser, and `test/live/follow_test_peer.mjs`. The live test runs the 
 plugin is BS-02) and follows the test peer within the stated tolerance of 1 ms phase error: 0.022 ms at most in
 three scenarios. Record: [docs/probes/bs-04-protocol-and-test-peer-2026-10-15.md](docs/probes/bs-04-protocol-and-test-peer-2026-10-15.md).
 BS-02 repeats the live test with the plugin.
+
+## BS-05 — Link bridge for gma3-phrase-sync
+
+**Request:** Publish gma3-phrase-sync's timeline (the selected CDJ's tempo, beat and bar) to a Link session. The
+service is MIT-licensed and keeps Link code out (decided 2026-10-23); it sends its timeline over loopback UDP in
+protocol LB1 to a separate GPL program built on Ableton's Link library. The bridge lives here because this
+repository is already GPL-2.0-or-later and has the library as a submodule. It shares no code with the plugin.
+
+**Depends on:** BS-00 (the submodule); gma3-phrase-sync PS-11b (the protocol, `docs/link-bridge.md`, and the MIT
+crate `link-bridge-protocol`, merged as 82eb52d).
+
+### Acceptance criteria
+
+- A Rust program in `bridge/` that uses the Link library from `modules/link` and the protocol crate for every
+  message (no copy of either).
+- "What the bridge does", rules 1 to 7 of `docs/link-bridge.md`: listens on loopback only (`127.0.0.1:7822` by
+  default); answers each ping at once with the Link clock at its arrival and the number of peers; takes timelines in
+  order per run, a new run replacing the old; `play` sets the tempo (unless 0) and aligns the bar's phase at the
+  quantum (not the beat count); `stop` sets the tempo only (unless 0); start/stop sharing behind an option, off by
+  default; lets go after `BYE` or 3 s without a timeline; answers another protocol with `VERSION`, at most once a
+  second and never in answer to a `VERSION`.
+- Unit tests of the protocol state and of the publishing, without sockets or Link, on a fake clock and session.
+- Tests on loopback with the real library, without joining the network's session: the clock offset the service
+  would measure is under 1 ms.
+- A test in which a second Link peer sees the tempo and phase arrive.
+
+**Status:** implemented in `bridge/` (`cargo run -p link-bridge -- --listen 127.0.0.1:7822`), described in
+[README.md](README.md#the-bridge-for-gma3-phrase-sync-bridge) and [docs/testing.md](docs/testing.md#the-bridge-bridge).
+The library is used through Ableton's C wrapper, `abl_link`, built by `bridge/build.rs` with CMake from the
+submodule and bound by hand in one module (`bridge/src/link.rs`, the crate's only unsafe code): it is the same
+Link-4.1 the test peer uses, it needs no libclang (bindgen) and no second copy of Link (the `rusty_link` crate
+bundles its own). Phase is aligned with `forceBeatAtTime`, which Link documents for bridging an external clock into
+a session; it moves the session's phase only. A tempo within 0.0005 BPM and a phase within 100 µs of the session's
+are left alone, so repeats don't re-time the other peers. On loopback the clock offset is 0-1 µs against a true 0.

@@ -11,7 +11,9 @@
 #                             check the test peer's JSON lines (needs python3)
 #   scripts/check.sh fixtures every fixture's expect lines are what Link's parser reads (needs peer)
 #   scripts/check.sh vectors  test/fixtures/vectors.txt is what Link's arithmetic gives (needs peer)
-#   scripts/check.sh [all]    all of the above
+#   scripts/check.sh bridge   the Link bridge in bridge/: cargo fmt --check, clippy -D warnings and cargo test (needs
+#                             Rust, CMake, the submodule and SSH access to gma3-phrase-sync; not part of all)
+#   scripts/check.sh [all]    all of the above but bridge
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -21,7 +23,7 @@ BUILD_DIR=${BUILD_DIR:-build}
 
 # Source files of this repository; the submodule and build output are excluded.
 sources() {
-  find . \( -path ./modules -o -path ./build -o -path ./.git \) -prune -o -type f \( "$@" \) -print | sort
+  find . \( -path ./modules -o -path ./build -o -path ./target -o -path ./.git \) -prune -o -type f \( "$@" \) -print | sort
 }
 
 check_lua_version() {
@@ -46,7 +48,7 @@ check_spdx() {
   missing=0
   count=0
   for f in $(sources -name '*.lua' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.h' -o -name '*.sh' -o -name '*.mjs' \
-    -o -name 'CMakeLists.txt' -o -name '*.cmake' -o -name '*.yml' -o -name '*.xml'); do
+    -o -name 'CMakeLists.txt' -o -name '*.cmake' -o -name '*.yml' -o -name '*.xml' -o -name '*.rs' -o -name '*.toml'); do
     count=$((count + 1))
     if ! head -n 5 "$f" | grep -q 'SPDX-License-Identifier: GPL-2.0-or-later'; then
       echo "error: $f has no 'SPDX-License-Identifier: GPL-2.0-or-later' in its first 5 lines" >&2
@@ -128,6 +130,17 @@ check_vectors() {
   echo "vectors: test/fixtures/vectors.txt matches Link's arithmetic"
 }
 
+check_bridge() {
+  if [ ! -f modules/link/CMakeLists.txt ]; then
+    echo "error: modules/link is empty; run: git submodule update --init --recursive" >&2
+    exit 1
+  fi
+  cargo fmt --all --check
+  cargo clippy -p link-bridge --all-targets -- -D warnings
+  cargo test -p link-bridge
+  echo "bridge: fmt, clippy and tests pass (tests/link_session.rs is ignored: it joins the network's Link session)"
+}
+
 case "${1:-all}" in
   lua) check_lua ;;
   spdx) check_spdx ;;
@@ -136,6 +149,7 @@ case "${1:-all}" in
   peer) check_peer ;;
   fixtures) check_fixtures ;;
   vectors) check_vectors ;;
+  bridge) check_bridge ;;
   all) check_spdx; check_lua; check_harness; check_scripts; check_peer; check_fixtures; check_vectors ;;
-  *) echo "usage: $0 [lua|spdx|harness|scripts|peer|fixtures|vectors|all]" >&2; exit 2 ;;
+  *) echo "usage: $0 [lua|spdx|harness|scripts|peer|fixtures|vectors|bridge|all]" >&2; exit 2 ;;
 esac
