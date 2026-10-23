@@ -57,3 +57,25 @@ jobs:
         run: scripts/check.sh fixtures
       - name: Vectors agree with Link's arithmetic
         run: scripts/check.sh vectors
+
+  bridge:
+    name: Link bridge (Rust) on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+          rustc --version
+      - name: fmt, clippy and tests (the Link session test is ignored)
+        run: scripts/check.sh bridge

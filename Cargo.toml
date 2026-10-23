@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+[workspace]
+resolver = "3"
+members = ["bridge"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-2.0-or-later"
+repository = "https://github.com/bdstark/gma3-beat-sync"
+publish = false

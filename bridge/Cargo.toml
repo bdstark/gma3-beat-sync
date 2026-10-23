@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+[package]
+name = "link-bridge"
+description = "Publishes gma3-phrase-sync's timeline (protocol LB1) to a Link session through Ableton's Link library"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[dependencies]
+# The messages (MIT): docs/link-bridge.md in that repository is the contract.
+link-bridge-protocol = { git = "https://github.com/bdstark/link-bridge-protocol.git", rev = "734d8454861d3fa6e5513d8692a48c345d179d1c" }
+ctrlc = "3"
+
+[build-dependencies]
+cmake = "0.1"
+
+[lints.rust]
+# Only src/link.rs, the bindings to the Link library, may use unsafe code.
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
