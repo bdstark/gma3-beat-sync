@@ -201,3 +201,7 @@ Link-4.1 the test peer uses, it needs no libclang (bindgen) and no second copy o
 bundles its own). Phase is aligned with `forceBeatAtTime`, which Link documents for bridging an external clock into
 a session; it moves the session's phase only. A tempo within 0.0005 BPM and a phase within 100 µs of the session's
 are left alone, so repeats don't re-time the other peers. On loopback the clock offset is 0-1 µs against a true 0.
+Against real Link on macOS (2026-10-23, `tests/link_session.rs`, a second peer in the same process): the bridge
+counted the peer in its pongs, the second peer had 126.50008 BPM (Link carries whole microseconds per beat) and the
+bar phase within 1 µs about a second after the first timeline, and a jump by whole bars left the phase. Built and
+tested on macOS only; CI builds it on Linux and Windows once it can fetch the protocol crate.
