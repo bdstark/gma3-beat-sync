@@ -40,7 +40,10 @@ fn tempo_and_phase_reach_another_peer() {
     .expect("the bridge sees the second peer");
     assert!(sample.offset.abs() < 1000, "clock off by {} µs (round trip {} µs)", sample.offset, sample.rtt);
     let others = peer.peers();
-    println!("bridge sees {} peer(s); the second peer sees {others}", sample.peers);
+    println!(
+        "clock offset {} µs (true 0), round trip {} µs; the bridge sees {} peer(s), the second peer {others}",
+        sample.offset, sample.rtt, sample.peers
+    );
 
     let bpm = 126.5;
     let at = peer.clock_us() + sample.offset;
