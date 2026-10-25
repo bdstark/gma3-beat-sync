@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 [package]
 name = "link-bridge"
-description = "Publishes gma3-phrase-sync's timeline (protocol LB1) to a Link session through Ableton's Link library"
-version = "0.1.0"
+description = "Publishes gma3-phrase-sync's timeline to a Link session, and reports the session back (protocols LB1 and LB2), through Ableton's Link library"
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -12,7 +12,7 @@ build = "build.rs"
 
 [dependencies]
 # The messages (MIT): docs/link-bridge.md in that repository is the contract.
-link-bridge-protocol = { git = "https://github.com/bdstark/link-bridge-protocol.git", rev = "734d8454861d3fa6e5513d8692a48c345d179d1c" }
+link-bridge-protocol = { git = "https://github.com/bdstark/link-bridge-protocol.git", rev = "1ef87da471bbef2adf52ed287e30206aaa488004" }
 ctrlc = "3"
 
 [build-dependencies]

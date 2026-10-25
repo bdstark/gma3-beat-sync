@@ -205,3 +205,39 @@ Against real Link on macOS (2026-10-23, `tests/link_session.rs`, a second peer i
 counted the peer in its pongs, the second peer had 126.50008 BPM (Link carries whole microseconds per beat) and the
 bar phase within 1 µs about a second after the first timeline, and a jump by whole bars left the phase. Built and
 tested on macOS only; CI builds it on Linux and Windows once it can fetch the protocol crate.
+
+## BS-06 — The bridge reports the Link session (LB2)
+
+**Request:** Let gma3-phrase-sync read the Link session through the bridge, so it can use Link's tempo and bar as a
+backup when no deck plays and see when Link disagrees with what its audio analysis hears (its AU-5). The service
+stays free of Link code: it reads the session in a new protocol revision, LB2.
+
+**Depends on:** BS-05; LB2 in [link-bridge-protocol](https://github.com/bdstark/link-bridge-protocol), pinned at
+1ef87da.
+
+### Acceptance criteria
+
+- The bridge speaks LB1 and LB2: each message is answered in its own revision, timelines and goodbyes are taken in
+  either, and a service that speaks only LB1 sees exactly LB1.
+- `LB2 SESSION` to the latest LB2 pinger (the subscriber): after each pong, and when the tempo moves by more than
+  0.001 BPM, the phase by more than 1 ms, or the quantum, start/stop, peers or `publishing` change; at most 20 a
+  second. The subscription ends after 3 s without an LB2 ping or on `BYE`.
+- `publishing` is 1 while the session's tempo or phase is the subscriber's own timeline (taken in the last 3 s).
+- The session is read in the bridge's loop, never between a datagram's arrival and its clock reading.
+- A newer protocol (`LB3`) gets `LB2 VERSION`.
+- Unit tests on a fake clock and fake session reads; loopback tests with the real library, not enabled; a test with
+  a second peer in the network's session (ignored by default); a read-only check against a session on the network.
+
+**Status:** implemented in `bridge/` (`--quantum N` sets the bar reports count beats in, 4 by default). The session
+is read with the app-thread capture between receives (a receive waits at most 10 ms), so a change is reported within
+about 10 ms when the 50 ms limit allows; on loopback a tempo committed to the bridge's instance was reported after 4-9
+ms. `playing` is `unknown` unless the bridge shares start/stop (`--start-stop`), since only then does the instance
+hear the other peers' start and stop.
+
+Read-only against real Link on macOS (2026-10-25, `watch_the_session`, 15 s, the session of another Link app on the
+same host at 120 BPM): the first report came straight after the first pong with no peers; the bridge joined the
+session about half a second later and the peer and the new phase were reported at once; then one report followed
+each pong (16 in 15 s, `seq` 1-16 in order), every one at 120 BPM with peers 1 and `publishing` 0, and each report's
+phase was within 0.0 µs of where the one before it put it. The tempo was not changed during the run: the session was another app's and was left
+alone, and `a_change_by_another_peer_reaches_the_session_report` was not run, since it would move that session; the
+loopback test covers a change. Built and tested on macOS only.
