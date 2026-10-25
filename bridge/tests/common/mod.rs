@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-//! A bridge on a thread, and a sender speaking LB1 to it the way gma3-phrase-sync's link sink does.
+//! A bridge on a thread, and a sender speaking LB1 or LB2 to it the way gma3-phrase-sync's link sink does.
 
 #![allow(dead_code)]
 
+use std::cell::RefCell;
 use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,7 +13,7 @@ use std::time::Duration;
 
 use link_bridge::link::Link;
 use link_bridge::server::{Config, Server};
-use link_bridge_protocol::{Message, State, Timeline};
+use link_bridge_protocol::{Message, Protocol, Session, State, Timeline};
 
 /// A bridge serving on a thread until dropped.
 pub struct Running {
@@ -24,7 +25,7 @@ pub struct Running {
 
 impl Running {
     pub fn start(enable_link: bool) -> Running {
-        let config = Config { listen: "127.0.0.1:0".parse().unwrap(), start_stop: false, enable_link };
+        let config = Config { listen: "127.0.0.1:0".parse().unwrap(), enable_link, ..Config::default() };
         let mut server = Server::bind(&config).unwrap();
         let addr = server.local_addr().unwrap();
         let link = server.link();
@@ -54,11 +55,14 @@ impl Drop for Running {
     }
 }
 
-/// The service's side: a socket, a nonce and a clock.
+/// The service's side: a socket, a nonce, the protocol it writes, and the session reports it has received.
 pub struct Sender {
     pub socket: UdpSocket,
     pub nonce: u64,
+    pub protocol: Protocol,
     seq: u32,
+    /// Session reports received while waiting for something else, oldest first.
+    pub sessions: RefCell<Vec<Session>>,
 }
 
 /// One ping's result.
@@ -70,15 +74,44 @@ pub struct Sample {
 }
 
 impl Sender {
+    /// A sender writing LB1, as before LB2.
     pub fn new(bridge: SocketAddr) -> Sender {
+        Sender::speaking(bridge, Protocol::Lb1)
+    }
+
+    pub fn speaking(bridge: SocketAddr, protocol: Protocol) -> Sender {
         let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
         socket.connect(bridge).unwrap();
         socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-        Sender { socket, nonce: 0x0000_01a2_b3c4_d5e6, seq: 0 }
+        Sender { socket, nonce: 0x0000_01a2_b3c4_d5e6, protocol, seq: 0, sessions: RefCell::new(vec![]) }
     }
 
     pub fn send(&self, m: &Message) {
-        self.socket.send(&m.encode()).unwrap();
+        self.socket.send(&m.encode_in(self.protocol)).unwrap();
+    }
+
+    /// The next datagram, its protocol and message.
+    pub fn recv_versioned(&self) -> (Protocol, Message) {
+        let mut buf = [0u8; 1500];
+        let n = self.socket.recv(&mut buf).unwrap();
+        Message::decode_versioned(&buf[..n]).unwrap()
+    }
+
+    /// The next session report, waiting at most `timeout`; reports received before are taken first.
+    pub fn next_session(&self, timeout: Duration) -> Option<Session> {
+        if !self.sessions.borrow().is_empty() {
+            return Some(self.sessions.borrow_mut().remove(0));
+        }
+        self.socket.set_read_timeout(Some(timeout)).unwrap();
+        let mut buf = [0u8; 1500];
+        let got = loop {
+            let Ok(n) = self.socket.recv(&mut buf) else { break None };
+            if let Ok((Protocol::Lb2, Message::Session(s))) = Message::decode_versioned(&buf[..n]) {
+                break Some(s);
+            }
+        };
+        self.socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        got
     }
 
     pub fn recv(&self) -> Message {
@@ -91,7 +124,17 @@ impl Sender {
     pub fn ping(&self, seq: u32, clock: impl Fn() -> i64) -> Sample {
         let sent = clock();
         self.send(&Message::Ping { nonce: self.nonce, seq, sender_us: sent });
-        let reply = self.recv();
+        // Session reports (LB2) may come before the pong: the one after the previous pong, or a change.
+        let reply = loop {
+            let (protocol, m) = self.recv_versioned();
+            match m {
+                Message::Session(s) => self.sessions.borrow_mut().push(s),
+                m => {
+                    assert_eq!(protocol, self.protocol, "{m:?}");
+                    break m;
+                }
+            }
+        };
         let back = clock();
         let Message::Pong { nonce, seq: s, sender_us, bridge_us, peers } = reply else { panic!("{reply:?}") };
         assert_eq!((nonce, s, sender_us), (self.nonce, seq, sent));

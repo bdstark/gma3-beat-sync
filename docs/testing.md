@@ -22,23 +22,39 @@ CI runs the same steps on Ubuntu with Lua 5.5.1 built from lua.org.
 
 `cargo test -p link-bridge` runs, without joining the network's Link session:
 - `src/bridge.rs`: the protocol state on a fake clock (pongs, ordering per run, a new run, `BYE`, the 3 s silence,
-  `VERSION` and its limits, malformed datagrams);
+  `VERSION` and its limits, malformed datagrams), and the session report on fake session reads (LB2 pongs and the
+  report after them, none for LB1, the tempo and phase steps, whole bars, the 20-a-second limit, `publishing`, the
+  subscription and its end);
 - `src/publish.rs`: what a timeline does to a fake session (tempo, bar phase, a jump by whole bars, the tolerances,
   quantum 0, `stop`, start/stop sharing);
 - `tests/loopback.rs`: the bridge on a loopback socket with a real Link instance that is not enabled. Every Link
   instance in a process reads the same clock, so the offset a sender measures from 16 pings must be 0; it is checked
-  to be under 1 ms. A `play` timeline sets the instance's tempo and phase, a jump by whole bars leaves the phase.
+  to be under 1 ms. A `play` timeline sets the instance's tempo and phase, a jump by whole bars leaves the phase. An
+  LB2 sender gets LB2 pongs and session reports that match the instance's phase; a tempo or phase change committed
+  to the instance (what another peer's change does to it) is reported within 10 ms or so (under 100 ms is checked);
+  a `play` timeline makes `publishing` 1; an LB1 sender gets no report.
 
-`tests/link_session.rs` is ignored by default because it **joins the Link session on the network** and moves its
-tempo and phase: every Link app on the network follows it. Run it only when nothing else is in the session:
+`tests/link_session.rs` is ignored by default because it **joins the Link session on the network**. Two of its
+tests move the session's tempo and phase, and every Link app on the network follows them. Run those only when
+nothing else is in the session:
 
 ```sh
-cargo test -p link-bridge --test link_session -- --ignored --nocapture
+cargo test -p link-bridge --test link_session -- --ignored --skip watch --nocapture
 ```
 
-It starts the bridge with Link enabled and a second Link peer in the same process, checks that the bridge counts the
-peer in its pongs and that the offset is under 1 ms, sends `play` timelines, and waits until the second peer has the
-tempo (within 0.001 BPM) and the bar phase (within 1 ms), then checks that a jump by whole bars leaves it.
+`tempo_and_phase_reach_another_peer` starts the bridge with Link enabled and a second Link peer in the same process,
+checks that the bridge counts the peer in its pongs and that the offset is under 1 ms, sends `play` timelines, and
+waits until the second peer has the tempo (within 0.001 BPM) and the bar phase (within 1 ms), then checks that a jump
+by whole bars leaves it. `a_change_by_another_peer_reaches_the_session_report` has the second peer move the tempo and
+the bar, and waits for an LB2 session report with the new tempo (within 0.001 BPM) and the phase (within 1 ms).
+
+`watch_the_session` only reads: the bridge joins the session already on the network (another app's), sends no
+timeline, and prints the reports an LB2 service would get, for `LINK_BRIDGE_WATCH_S` seconds (default 20). A tempo
+change made in that app shows up in the next lines:
+
+```sh
+LINK_BRIDGE_WATCH_S=30 cargo test -p link-bridge --test link_session watch -- --ignored --nocapture
+```
 
 ### The harness (`test/lua/protocol_test.lua`)
 

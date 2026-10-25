@@ -85,7 +85,7 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "link-bridge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cmake",
  "ctrlc",
@@ -94,8 +94,8 @@ dependencies = [
 
 [[package]]
 name = "link-bridge-protocol"
-version = "0.1.0"
-source = "git+https://github.com/bdstark/link-bridge-protocol.git?rev=734d8454861d3fa6e5513d8692a48c345d179d1c#734d8454861d3fa6e5513d8692a48c345d179d1c"
+version = "0.2.0"
+source = "git+https://github.com/bdstark/link-bridge-protocol.git?rev=1ef87da471bbef2adf52ed287e30206aaa488004#1ef87da471bbef2adf52ed287e30206aaa488004"
 
 [[package]]
 name = "nix"

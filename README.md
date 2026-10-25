@@ -31,9 +31,9 @@ its beat, and the console shows its effect about a frame later (`BeatSync.LeadMs
 ## The bridge for gma3-phrase-sync (`bridge/`)
 
 A second, separate program in this repository: `link-bridge` publishes the tempo and bar phase of
-gma3-phrase-sync (which follows Pioneer CDJs) to a Link session. The
+gma3-phrase-sync (which follows Pioneer CDJs) to a Link session, and reports the session back to it. The
 service stays MIT-licensed and contains no Link code; it sends its timeline over loopback UDP in a small protocol,
-LB1, specified in [`docs/link-bridge.md`](https://github.com/bdstark/link-bridge-protocol/blob/734d8454861d3fa6e5513d8692a48c345d179d1c/docs/link-bridge.md) of the MIT crate
+LB1 or LB2, specified in [`docs/link-bridge.md`](https://github.com/bdstark/link-bridge-protocol/blob/1ef87da471bbef2adf52ed287e30206aaa488004/docs/link-bridge.md) of the MIT crate
 [link-bridge-protocol](https://github.com/bdstark/link-bridge-protocol). The bridge is written in Rust, uses Ableton's Link library
 from `modules/link` through its C wrapper (`abl_link`), and shares no code with the console plugin.
 
@@ -52,12 +52,17 @@ Then set `[sink.link] bridge = "127.0.0.1:7822"` in gma3-phrase-sync's configura
 - shares start and stop with the session only with `--start-stop` (off by default);
 - lets go of the session after the service says goodbye or sends nothing for 3 s, leaving the tempo and phase as
   they are, and stays in the session;
-- answers a sender speaking another protocol revision with its own (`VERSION`), at most once a second.
+- answers each message in its own revision (LB1 or LB2), so a service that speaks only LB1 works as before;
+- reports the session to a service that pings in LB2 (`SESSION`): its tempo, the beat in bars of `--quantum` beats
+  (4 by default), whether it plays (when start/stop is shared), the peers, and whether its tempo or phase is that
+  service's own timeline. A report follows each pong and each change (0.001 BPM, 1 ms of phase, peers and the rest),
+  at most 20 a second;
+- answers a sender speaking a newer protocol revision with its own newest (`VERSION`), at most once a second.
 
 It needs Rust 1.99 or later, CMake 3.16 or later and a C++ compiler. The protocol's messages come from the
 `link-bridge-protocol` crate, which Cargo fetches from its repository at a pinned revision.
-Tests: `scripts/check.sh bridge` ([docs/testing.md](docs/testing.md#the-bridge-bridge)). The work is ticket BS-05 in
-[TICKETS.md](TICKETS.md).
+Tests: `scripts/check.sh bridge` ([docs/testing.md](docs/testing.md#the-bridge-bridge)). The work is tickets BS-05
+and BS-06 in [TICKETS.md](TICKETS.md).
 
 ## Related projects
 
