@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# New code/base updates supersede older validation; metadata edits do not cancel it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'edited' || github.event.changes.base != null) }}
+
 jobs:
   lua:
     name: Lua 5.5 syntax, SPDX headers, harness and scripts
