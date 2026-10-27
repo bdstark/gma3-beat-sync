@@ -10,8 +10,14 @@ on:
 permissions:
   contents: read
 
+# Metadata-only edits must not cancel a running validation of the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && github.event.action == 'edited' && !github.event.changes.base && 'metadata' || 'code' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lua:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null
     name: Lua 5.5 syntax, SPDX headers, harness and scripts
     runs-on: ubuntu-latest
     env:
@@ -35,6 +41,7 @@ jobs:
       - run: scripts/check.sh scripts
 
   peer:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null
     name: Test peer build, fixtures and vectors (Link submodule)
     runs-on: ubuntu-latest
     env:
@@ -59,6 +66,7 @@ jobs:
         run: scripts/check.sh vectors
 
   bridge:
+    if: github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.base != null
     name: Link bridge (Rust) on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:

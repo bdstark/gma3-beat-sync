@@ -26,6 +26,7 @@ permissions:
   statuses: read
 jobs:
   review-and-accept:
+    if: vars.PR_AUTOMATION_ENABLED == 'true'
     uses: bdstark/gma3-mcp/.github/workflows/pr-review-service.yml@2dd884b4e61399537591b82f803b8d7abde82e06
     secrets:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
